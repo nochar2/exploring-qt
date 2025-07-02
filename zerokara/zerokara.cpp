@@ -12,6 +12,9 @@
 #include <QTextEdit>
 #include <QSlider>
 
+// event
+#include <QScrollEvent>
+
 // painter stuff
 #include <QPainter>
 #include <QPalette>
@@ -24,42 +27,58 @@ class NoteDisplayWidget : public QWidget {
 
   bool downscroll = false;
   int cmod = 400;
+  int px_chart_start_off = 30;
 
   public:
   void onDownscrollClick(Qt::CheckState ds_state) { this->downscroll = ds_state == Qt::Checked; this->update(); }
   void onCmodChange(int value) { this->cmod = value; this->update(); }
   
   struct RectSpec {
-    QRectF rect;
+    QList<QRectF> rects; // actually 1 .. 4 of them
     QColor color;
   };
 
   protected:
+  void wheelEvent(QWheelEvent *event) override {
+    if (event->angleDelta().ry() > 0) {
+      printf("scrollev, delta > 0\n");
+      px_chart_start_off += 30;
+    } else {
+      printf("scrollev, delta < 0\n");
+      px_chart_start_off -= 30;
+    }
+    this->update();
+  };
+
   void paintEvent(QPaintEvent *event) override {
     (void) event;
     
+    int note_width  = 60;
+    int note_height = 20;
+    int px_judge_line_off = 30;
+    QPen pen;
+
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
   
-    // draw a judge line
-    int px_judge_line_off = 20;
     auto judge_line = QLineF(0, px_judge_line_off, this->width()-1, px_judge_line_off);
-
     if (downscroll) {
       int new_y = this->height() - judge_line.y1();
       judge_line.setLine(0, new_y, this->width()-1, new_y);
     }
-    painter.setPen(Qt::white);
+    pen.setWidth(5); pen.setColor(Qt::white); painter.setPen(pen);
     painter.drawLine(judge_line);
 
 
-    
-    // this is just outline
-    // QPen pen(Qt::red);
-    // painter.setPen(pen);
+    // draw corner beams around the left and right edge of playfield
+    auto left_edge  = QLineF(10,              0, 10,               this->height()-1);
+    auto right_edge = QLineF(10+note_width*4, 0, 10+note_width*4,  this->height()-1);
+    pen.setWidth(2); pen.setColor(Qt::gray); painter.setPen(pen);
+    painter.drawLine(left_edge);
+    painter.drawLine(right_edge);
 
-    QBrush brush(Qt::red);
-    painter.setBrush(brush);
+    
+    painter.setBrush(Qt::red);
 
     // who cares, everyone uses 4/4
     auto ticks_per_1_ = [](int subdiv){return 192./subdiv;};
@@ -71,32 +90,79 @@ class NoteDisplayWidget : public QWidget {
     float secs_per_smtick = secs_per_beat / 48.; // smallest subdivision in stepmania games
     float px_per_smtick = secs_per_smtick * cmod;
 
-    int rwidth = 60;
-    auto rss = {
-      (RectSpec){ QRectF(10+rwidth*0, px_judge_line_off + px_per_smtick * (int)(ticks_per_1_(16))*0, rwidth, 20), Qt::red },
-      (RectSpec){ QRectF(10+rwidth*1, px_judge_line_off + px_per_smtick * (int)(ticks_per_1_(16))*1, rwidth, 20), Qt::yellow },
-      (RectSpec){ QRectF(10+rwidth*2, px_judge_line_off + px_per_smtick * (int)(ticks_per_1_(16))*2, rwidth, 20), Qt::blue },
-      (RectSpec){ QRectF(10+rwidth*3, px_judge_line_off + px_per_smtick * (int)(ticks_per_1_(16))*3, rwidth, 20), Qt::yellow },
 
-      // all of this will have to be generalized away into a lambda
-      (RectSpec){ QRectF(10+rwidth*0, px_judge_line_off + px_per_smtick * (int)(ticks_per_1_(24))*6,  rwidth, 20), Qt::red },
-      (RectSpec){ QRectF(10+rwidth*1, px_judge_line_off + px_per_smtick * (int)(ticks_per_1_(24))*7,  rwidth, 20), Qt::magenta },
-      (RectSpec){ QRectF(10+rwidth*2, px_judge_line_off + px_per_smtick * (int)(ticks_per_1_(24))*8,  rwidth, 20), Qt::green },
-      (RectSpec){ QRectF(10+rwidth*3, px_judge_line_off + px_per_smtick * (int)(ticks_per_1_(24))*9,  rwidth, 20), Qt::blue },
-      (RectSpec){ QRectF(10+rwidth*2, px_judge_line_off + px_per_smtick * (int)(ticks_per_1_(24))*10, rwidth, 20), Qt::green },
-      (RectSpec){ QRectF(10+rwidth*1, px_judge_line_off + px_per_smtick * (int)(ticks_per_1_(24))*11, rwidth, 20), Qt::magenta },
+    auto rectangles_at_smtick_pos = [=](int n_beats, int n_smticks, int column_mask){
+      n_smticks += n_beats * 48;
+
+      assert(0 <= column_mask && column_mask <= 15);
+      QList<QPair<int,QColor>> snap_pairs = {
+        QPair((192/4),  QColorConstants::Red),
+        QPair((192/8),  QColorConstants::Blue),
+        QPair((192/12), QColorConstants::Green),
+        QPair((192/16), QColorConstants::Yellow),
+        QPair((192/24), QColorConstants::DarkMagenta),
+        QPair((192/32), QColorConstants::Svg::orange),
+        QPair((192/48), QColorConstants::Cyan),
+      };
+
+      auto line = (RectSpec){
+        .rects = {},
+        .color = QColorConstants::Gray
+      };
+
+      for (int i = 8, column_i = 0; i > 0; i /= 2, column_i += 1) {
+        if (column_mask & i) {
+          line.rects.push_back(
+            QRectF(10 + note_width * column_i, px_chart_start_off + px_per_smtick * n_smticks, note_width, note_height)
+          );
+        }
+      }
+
+      for (auto [snap, col] : snap_pairs) {
+        if (n_smticks % snap == 0) { line.color = col; return line; }
+      }
+      return line;
+    };
+
+
+    // whatever name for 1..4 notes at one place
+    auto patterns = {
+      rectangles_at_smtick_pos(0, (int)(ticks_per_1_(16))*0,  0b1000),
+      rectangles_at_smtick_pos(0, (int)(ticks_per_1_(16))*1,  0b0100),
+      rectangles_at_smtick_pos(0, (int)(ticks_per_1_(16))*2,  0b0010),
+      rectangles_at_smtick_pos(0, (int)(ticks_per_1_(16))*3,  0b0001),
+
+      rectangles_at_smtick_pos(1, (int)(ticks_per_1_(24))*0,  0b1000),
+      rectangles_at_smtick_pos(1, (int)(ticks_per_1_(24))*1,  0b0100),
+      rectangles_at_smtick_pos(1, (int)(ticks_per_1_(24))*2,  0b0010),
+      rectangles_at_smtick_pos(1, (int)(ticks_per_1_(24))*3,  0b0100),
+      rectangles_at_smtick_pos(1, (int)(ticks_per_1_(24))*4,  0b0010),
+      rectangles_at_smtick_pos(1, (int)(ticks_per_1_(24))*5,  0b0001),
+
+      rectangles_at_smtick_pos(2, (int)(ticks_per_1_(32))*0,  0b1100),
+      rectangles_at_smtick_pos(2, (int)(ticks_per_1_(32))*1,  0b0001),
+      rectangles_at_smtick_pos(2, (int)(ticks_per_1_(32))*2,  0b0010),
+      rectangles_at_smtick_pos(2, (int)(ticks_per_1_(32))*3,  0b0100),
+      rectangles_at_smtick_pos(2, (int)(ticks_per_1_(32))*4,  0b1000),
+      rectangles_at_smtick_pos(2, (int)(ticks_per_1_(32))*5,  0b0001),
+      rectangles_at_smtick_pos(2, (int)(ticks_per_1_(32))*6,  0b0010),
+      rectangles_at_smtick_pos(2, (int)(ticks_per_1_(32))*7,  0b1000),
+
+      rectangles_at_smtick_pos(3, (int)(ticks_per_1_(32))*0,  0b0110),
     };
 
     QRectF cont_rect = this->contentsRect();
 
-    for (auto rs : rss) {
-      if (downscroll) {
-        // printf("cont_rect h: %d, rect_y: %g, rect_h: %g\n",
-        //        cont_rect.height(), rect.y(), rect.height());
-        rs.rect.moveBottom(cont_rect.height() - rs.rect.top());
-        // printf("top y is now %g\n", rect.y());
+    for (auto pat : patterns) {
+      for (auto rect : pat.rects) {
+        if (downscroll) {
+          // printf("cont_rect h: %d, rect_y: %g, rect_h: %g\n",
+          //        cont_rect.height(), rect.y(), rect.height());
+          rect.moveBottom(cont_rect.height() - rect.top());
+          // printf("top y is now %g\n", rect.y());
+        }
+        painter.fillRect(rect, pat.color);
       }
-      painter.fillRect(rs.rect, rs.color);
     }
 
     // printf("%d %d\n", cont_rect.width(), cont_rect.height());
@@ -148,13 +214,12 @@ int main(int argc, char **argv) {
       auto pal = preview_actual.palette();
       pal.setColor(QPalette::Window, Qt::black);
       preview_actual.setPalette(pal);
-    preview_tile.addWidget(&preview_actual, 6);
+    preview_tile.addWidget(&preview_actual, 8);
 
     QHBoxLayout preview_controls;
+
       QCheckBox downscroll_chk("Downscroll");
         downscroll_chk.setCheckState(Qt::Checked);
-        preview_controls.addWidget(&downscroll_chk);
-        preview_controls.addWidget(&downscroll_chk);
         QObject::connect(
           &downscroll_chk,
           &QCheckBox::checkStateChanged,
@@ -162,23 +227,46 @@ int main(int argc, char **argv) {
           &NoteDisplayWidget::onDownscrollClick
         );
         preview_actual.onDownscrollClick(downscroll_chk.checkState());  // set initial
-      preview_controls.addWidget(&downscroll_chk);
+      preview_controls.addWidget(&downscroll_chk, 6);
+      preview_controls.setAlignment(&downscroll_chk, Qt::AlignCenter);
 
-      QSlider cmod_slider(Qt::Horizontal, nullptr); // this is 100 % wrong
-        cmod_slider.setMinimum(100);
+      QLabel cmod_value;
+      preview_controls.addWidget(&cmod_value, 1);
+      preview_controls.setAlignment(&cmod_value, Qt::AlignCenter);      
+
+      // -- TODO: When I ctrl + scrollwheel over the preview area, do the following:
+      // * maybe just printf "hit!"
+      // * redraw snap lines
+      // * update snap value text (snap: 4th, 8th etc.)
+      // * (bonus: on ctrl + shift + scrollwheel, do fine snap increments)
+      // QLabel snap_text;
+      // preview_controls.addWidget(&snap_text, 1);
+
+      QSlider cmod_slider(Qt::Vertical, nullptr); // doesn't look super aesthetic, but it's ok for now
+        cmod_slider.setMinimum(300);
         cmod_slider.setMaximum(1000);
+        cmod_slider.setValue(700);
         cmod_slider.setPageStep(200);
-        cmod_slider.setSingleStep(20);
+        cmod_slider.setSingleStep(15);
         QObject::connect(
           &cmod_slider,
           &QSlider::valueChanged,
           &preview_actual,
           &NoteDisplayWidget::onCmodChange
         );
-        preview_actual.onCmodChange(cmod_slider.value()); // set initial
-      preview_controls.addWidget(&cmod_slider);
+        QObject::connect(
+          &cmod_slider,
+          &QSlider::valueChanged,
+          &cmod_value,
+          [&](int value){ cmod_value.setText(QString("CMOD: \n%1").arg(value)); }
+        );
+          
+        cmod_value.setText(QString("CMOD: \n%1").arg(cmod_slider.value())); // set initial
+        preview_actual.onCmodChange(cmod_slider.value());
+      preview_controls.addWidget(&cmod_slider, 1);
+      preview_controls.setAlignment(&cmod_slider, Qt::AlignCenter);
     preview_tile.addLayout(&preview_controls, 1);
-  layout.addLayout(&preview_tile, 2);
+  layout.addLayout(&preview_tile, 3);
 
 
 

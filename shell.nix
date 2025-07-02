@@ -1,4 +1,7 @@
 with import <nixpkgs> {};
 mkShell {
-  buildInputs = [kdePackages.qtbase];
+  buildInputs = [
+    kdePackages.qtbase
+    kdePackages.qtdeclarative
+  ];
 }
