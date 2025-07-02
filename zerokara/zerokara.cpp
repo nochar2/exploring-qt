@@ -130,8 +130,8 @@ int main(int argc, char **argv) {
   item.setExpanded(true);
 
   QHBoxLayout layout(&root);
+  
   layout.addWidget(&tree, 1);
-
   // -- QLabel label; label.setText("Hi world"); label.setAlignment(Qt::AlignCenter);
   // -- layout.addWidget(&label, 3);
   QTextEdit viewer;
@@ -140,41 +140,50 @@ int main(int argc, char **argv) {
   layout.addWidget(&viewer, 2);
 
 
+  // You can't scope these, they need to live. Also, if you make them static, it aborts on exit
+  // leaving just the indentation for now
   QVBoxLayout preview_tile;
-  NoteDisplayWidget preview_actual;
-  preview_actual.setAutoFillBackground(true);
-  auto pal = preview_actual.palette();
-  pal.setColor(QPalette::Window, Qt::black);
-  preview_actual.setPalette(pal);
-  preview_tile.addWidget(&preview_actual, 6);
+    NoteDisplayWidget preview_actual;
+      preview_actual.setAutoFillBackground(true);
+      auto pal = preview_actual.palette();
+      pal.setColor(QPalette::Window, Qt::black);
+      preview_actual.setPalette(pal);
+    preview_tile.addWidget(&preview_actual, 6);
 
-  QHBoxLayout preview_controls;
-  QCheckBox downscroll_cbox("Downscroll");
-  preview_controls.addWidget(&downscroll_cbox);
-  QSlider cmod_slider(Qt::Horizontal, nullptr); // this is 100 % wrong
-  cmod_slider.setMinimum(100);
-  cmod_slider.setMaximum(1000);
-  cmod_slider.setPageStep(200);
-  cmod_slider.setSingleStep(20);
-  preview_controls.addWidget(&downscroll_cbox);
-  preview_controls.addWidget(&cmod_slider);
-  preview_tile.addLayout(&preview_controls, 1);
+    QHBoxLayout preview_controls;
+      QCheckBox downscroll_chk("Downscroll");
+        downscroll_chk.setCheckState(Qt::Checked);
+        preview_controls.addWidget(&downscroll_chk);
+        preview_controls.addWidget(&downscroll_chk);
+        QObject::connect(
+          &downscroll_chk,
+          &QCheckBox::checkStateChanged,
+          &preview_actual,
+          &NoteDisplayWidget::onDownscrollClick
+        );
+        preview_actual.onDownscrollClick(downscroll_chk.checkState());  // set initial
+      preview_controls.addWidget(&downscroll_chk);
 
+      QSlider cmod_slider(Qt::Horizontal, nullptr); // this is 100 % wrong
+        cmod_slider.setMinimum(100);
+        cmod_slider.setMaximum(1000);
+        cmod_slider.setPageStep(200);
+        cmod_slider.setSingleStep(20);
+        QObject::connect(
+          &cmod_slider,
+          &QSlider::valueChanged,
+          &preview_actual,
+          &NoteDisplayWidget::onCmodChange
+        );
+        preview_actual.onCmodChange(cmod_slider.value()); // set initial
+      preview_controls.addWidget(&cmod_slider);
+    preview_tile.addLayout(&preview_controls, 1);
   layout.addLayout(&preview_tile, 2);
 
-  QObject::connect(
-    &downscroll_cbox,
-    &QCheckBox::checkStateChanged,
-    &preview_actual,
-    &NoteDisplayWidget::onDownscrollClick
-  );
 
-  QObject::connect(
-    &cmod_slider,
-    &QSlider::valueChanged,
-    &preview_actual,
-    &NoteDisplayWidget::onCmodChange
-  );
+
+
+
 
   root.show();
 
