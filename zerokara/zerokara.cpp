@@ -1,39 +1,59 @@
 #include <QApplication>
+
+// widgets
 #include <QTreeWidget>
-#include <QHBoxLayout>
+#include <QCheckBox>
+#include <QSlider>
+#include <QBoxLayout>
 #include <QWindow>
 #include <QFrame>
 #include <QRadioButton>
 #include <QLabel>
 #include <QTextEdit>
-#include <QPalette>
-#include <QColor>
+#include <QSlider>
+
+// painter stuff
 #include <QPainter>
-#include <QPaintEvent>
-#include <QRect>
-#include <QPaintEvent>
 #include <QPalette>
-#include <QCheckBox>
+#include <QRect>
+
 
 class NoteDisplayWidget : public QWidget {
   // upscroll is natural to think about in normal coordinates
   // (screen y grows downwards)
 
-  // an issue is that this has to be in sync with the button which
-  // toggles it :( let's start with false for now
   bool downscroll = false;
+  int cmod = 400;
 
   public:
-  void onDownscrollClick() {
-    this->downscroll = !this->downscroll;
-    this->update();
-  }
+  void onDownscrollClick(Qt::CheckState ds_state) { this->downscroll = ds_state == Qt::Checked; this->update(); }
+  void onCmodChange(int value) { this->cmod = value; this->update(); }
   
+  struct RectSpec {
+    QRectF rect;
+    QColor color;
+  };
+
   protected:
   void paintEvent(QPaintEvent *event) override {
+    (void) event;
+    
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
   
+    // draw a judge line
+    int px_judge_line_off = 20;
+    auto judge_line = QLineF(0, px_judge_line_off, this->width()-1, px_judge_line_off);
+
+    if (downscroll) {
+      int new_y = this->height() - judge_line.y1();
+      judge_line.setLine(0, new_y, this->width()-1, new_y);
+    }
+    painter.setPen(Qt::white);
+    painter.drawLine(judge_line);
+
+
+    
     // this is just outline
     // QPen pen(Qt::red);
     // painter.setPen(pen);
@@ -41,21 +61,49 @@ class NoteDisplayWidget : public QWidget {
     QBrush brush(Qt::red);
     painter.setBrush(brush);
 
-    QRectF rect(10, 10, 100, 20);
+    // who cares, everyone uses 4/4
+    auto ticks_per_1_ = [](int subdiv){return 192./subdiv;};
 
-    auto cont_rect = this->contentsRect();
+    // A bunch of 16th notes for an example. Let's assume BPM = 180, and let's assume CMOD
+    // means pixels per second.
+    float bpm = 180.;
+    float secs_per_beat = 60./bpm;
+    float secs_per_smtick = secs_per_beat / 48.; // smallest subdivision in stepmania games
+    float px_per_smtick = secs_per_smtick * cmod;
+
+    int rwidth = 60;
+    auto rss = {
+      (RectSpec){ QRectF(10+rwidth*0, px_judge_line_off + px_per_smtick * (int)(ticks_per_1_(16))*0, rwidth, 20), Qt::red },
+      (RectSpec){ QRectF(10+rwidth*1, px_judge_line_off + px_per_smtick * (int)(ticks_per_1_(16))*1, rwidth, 20), Qt::yellow },
+      (RectSpec){ QRectF(10+rwidth*2, px_judge_line_off + px_per_smtick * (int)(ticks_per_1_(16))*2, rwidth, 20), Qt::blue },
+      (RectSpec){ QRectF(10+rwidth*3, px_judge_line_off + px_per_smtick * (int)(ticks_per_1_(16))*3, rwidth, 20), Qt::yellow },
+
+      // all of this will have to be generalized away into a lambda
+      (RectSpec){ QRectF(10+rwidth*0, px_judge_line_off + px_per_smtick * (int)(ticks_per_1_(24))*6,  rwidth, 20), Qt::red },
+      (RectSpec){ QRectF(10+rwidth*1, px_judge_line_off + px_per_smtick * (int)(ticks_per_1_(24))*7,  rwidth, 20), Qt::magenta },
+      (RectSpec){ QRectF(10+rwidth*2, px_judge_line_off + px_per_smtick * (int)(ticks_per_1_(24))*8,  rwidth, 20), Qt::green },
+      (RectSpec){ QRectF(10+rwidth*3, px_judge_line_off + px_per_smtick * (int)(ticks_per_1_(24))*9,  rwidth, 20), Qt::blue },
+      (RectSpec){ QRectF(10+rwidth*2, px_judge_line_off + px_per_smtick * (int)(ticks_per_1_(24))*10, rwidth, 20), Qt::green },
+      (RectSpec){ QRectF(10+rwidth*1, px_judge_line_off + px_per_smtick * (int)(ticks_per_1_(24))*11, rwidth, 20), Qt::magenta },
+    };
+
+    QRectF cont_rect = this->contentsRect();
+
+    for (auto rs : rss) {
+      if (downscroll) {
+        // printf("cont_rect h: %d, rect_y: %g, rect_h: %g\n",
+        //        cont_rect.height(), rect.y(), rect.height());
+        rs.rect.moveBottom(cont_rect.height() - rs.rect.top());
+        // printf("top y is now %g\n", rect.y());
+      }
+      painter.fillRect(rs.rect, rs.color);
+    }
+
     // printf("%d %d\n", cont_rect.width(), cont_rect.height());
 
-    if (downscroll) {
-      // printf("cont_rect h: %d, rect_y: %g, rect_h: %g\n",
-      //        cont_rect.height(), rect.y(), rect.height());
-      rect.moveBottom(cont_rect.height() - rect.top());
-      // printf("top y is now %g\n", rect.y());
-    }
     // printf("rect xywh is now: %g %g %g %g\n",
            // rect.x(), rect.y(), rect.width(), rect.height());
 
-    painter.fillRect(rect, brush);
 
   }
 };
@@ -100,8 +148,17 @@ int main(int argc, char **argv) {
   preview_actual.setPalette(pal);
   preview_tile.addWidget(&preview_actual, 6);
 
+  QHBoxLayout preview_controls;
   QCheckBox downscroll_cbox("Downscroll");
-  preview_tile.addWidget(&downscroll_cbox, 1);
+  preview_controls.addWidget(&downscroll_cbox);
+  QSlider cmod_slider(Qt::Horizontal, nullptr); // this is 100 % wrong
+  cmod_slider.setMinimum(100);
+  cmod_slider.setMaximum(1000);
+  cmod_slider.setPageStep(200);
+  cmod_slider.setSingleStep(20);
+  preview_controls.addWidget(&downscroll_cbox);
+  preview_controls.addWidget(&cmod_slider);
+  preview_tile.addLayout(&preview_controls, 1);
 
   layout.addLayout(&preview_tile, 2);
 
@@ -110,6 +167,13 @@ int main(int argc, char **argv) {
     &QCheckBox::checkStateChanged,
     &preview_actual,
     &NoteDisplayWidget::onDownscrollClick
+  );
+
+  QObject::connect(
+    &cmod_slider,
+    &QSlider::valueChanged,
+    &preview_actual,
+    &NoteDisplayWidget::onCmodChange
   );
 
   root.show();
