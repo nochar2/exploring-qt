@@ -20,6 +20,69 @@
 #include <QPalette>
 #include <QRect>
 
+// #include <chrono>
+
+// Ikik, you can only have one snap subdivision per measure.
+QString chart = ""
+"#TITLE:Nothing;\n"
+"#NOTES:dance-single:myself:15:Edit:0.000:\n"
+"1000\n"
+"0100\n"
+"0010\n"
+"0001\n"
+",\n"
+"1000\n"
+"0100\n"
+"0010\n"
+"0100\n"
+"0010\n"
+"0001\n"
+",\n"
+"1100\n"
+"0001\n"
+"0010\n"
+"0100\n"
+"1000\n"
+"0001\n"
+"0010\n"
+"1000\n"
+",\n"
+"0110\n"
+";";
+
+enum class GameType { DanceSingle };
+enum class DiffType { Beginner, Easy, Medium, Hard, Challenge, Edit };
+enum class NoteType { None, Tap, Hold, HRLift, Rolld, Mine, Lift, Fake };
+
+struct NoteInfo {
+  uint32_t measure;
+  uint8_t  beat; // 0..3
+  uint8_t  sm_tick; // 0..47
+  std::array<NoteType, 4>  line;
+  float seconds;
+};
+
+struct Difficulty {
+  GameType gt;
+  QString charter;
+  uint32_t diff_level;
+  DiffType diff_type;
+  QList<float> groove_values;
+  QList<NoteInfo> notes;
+};
+
+struct SmFile {
+  QString title;
+  QList<Difficulty> diffs;
+};
+
+SmFile parse(QString string) {
+  // utf-16
+  for (QChar c : string) {
+  }
+}
+
+
 
 class NoteDisplayWidget : public QWidget {
   // upscroll is natural to think about in normal coordinates
@@ -41,54 +104,64 @@ class NoteDisplayWidget : public QWidget {
   protected:
   void wheelEvent(QWheelEvent *event) override {
     if (event->angleDelta().ry() > 0) {
-      printf("scrollev, delta > 0\n");
+      // printf("scrollev, delta > 0\n");
       px_chart_start_off += 30;
     } else {
-      printf("scrollev, delta < 0\n");
+      // printf("scrollev, delta < 0\n");
       px_chart_start_off -= 30;
     }
     this->update();
   };
 
   void paintEvent(QPaintEvent *event) override {
+    // auto tb = std::chrono::system_clock().now();
+
     (void) event;
     
     int note_width  = 60;
     int note_height = 20;
     int px_judge_line_off = 30;
-    QPen pen;
+    int left_start = this->width() / 2 - 2 * note_width; // for centering
+
+    // who cares, everyone uses 4/4
+    auto ticks_per_1_ = [](int subdiv){return 192./subdiv;};
+
+    // 16th notes for an example. Let's assume BPM = 180, and let's assume CMOD
+    // means pixels per second (which is not entirely true, it is more like assuming h == 480)
+    float bpm = 180.;
+    float secs_per_beat = 60./bpm;
+    float secs_per_smtick = secs_per_beat / 48.; // smallest subdivision in stepmania games
+    float px_per_smtick = secs_per_smtick * cmod;
+
 
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
   
+    // draw judge line
     auto judge_line = QLineF(0, px_judge_line_off, this->width()-1, px_judge_line_off);
     if (downscroll) {
       int new_y = this->height() - judge_line.y1();
       judge_line.setLine(0, new_y, this->width()-1, new_y);
     }
+    QPen pen;
     pen.setWidth(5); pen.setColor(Qt::white); painter.setPen(pen);
     painter.drawLine(judge_line);
 
-
     // draw corner beams around the left and right edge of playfield
-    auto left_edge  = QLineF(10,              0, 10,               this->height()-1);
-    auto right_edge = QLineF(10+note_width*4, 0, 10+note_width*4,  this->height()-1);
+    auto left_edge  = QLineF(left_start,              0, left_start,               this->height()-1);
+    auto right_edge = QLineF(left_start+note_width*4, 0, left_start+note_width*4,  this->height()-1);
     pen.setWidth(2); pen.setColor(Qt::gray); painter.setPen(pen);
     painter.drawLine(left_edge);
     painter.drawLine(right_edge);
 
-    
-    painter.setBrush(Qt::red);
-
-    // who cares, everyone uses 4/4
-    auto ticks_per_1_ = [](int subdiv){return 192./subdiv;};
-
-    // A bunch of 16th notes for an example. Let's assume BPM = 180, and let's assume CMOD
-    // means pixels per second.
-    float bpm = 180.;
-    float secs_per_beat = 60./bpm;
-    float secs_per_smtick = secs_per_beat / 48.; // smallest subdivision in stepmania games
-    float px_per_smtick = secs_per_smtick * cmod;
+    // draw snap lines (for now, do 4ths)
+    for (int i = 0; i < 10; i++) {
+      int y = px_chart_start_off + i * (px_per_smtick * ticks_per_1_(4));
+      if (downscroll) y = this->height() - y;
+      auto snap_line = QLineF(left_start, y, left_start + 4 * note_width, y);
+      pen.setWidth(1); pen.setColor(Qt::red); painter.setPen(pen);
+      painter.drawLine(snap_line);
+    }
 
 
     auto rectangles_at_smtick_pos = [=](int n_beats, int n_smticks, int column_mask){
@@ -113,7 +186,7 @@ class NoteDisplayWidget : public QWidget {
       for (int i = 8, column_i = 0; i > 0; i /= 2, column_i += 1) {
         if (column_mask & i) {
           line.rects.push_back(
-            QRectF(10 + note_width * column_i, px_chart_start_off + px_per_smtick * n_smticks, note_width, note_height)
+            QRectF(left_start + note_width * column_i, px_chart_start_off + px_per_smtick * n_smticks, note_width, note_height)
           );
         }
       }
@@ -165,12 +238,10 @@ class NoteDisplayWidget : public QWidget {
       }
     }
 
-    // printf("%d %d\n", cont_rect.width(), cont_rect.height());
 
-    // printf("rect xywh is now: %g %g %g %g\n",
-           // rect.x(), rect.y(), rect.width(), rect.height());
-
-
+    // auto te = std::chrono::system_clock().now();
+    // auto tdiff = std::chrono::duration_cast<std::chrono::microseconds>(te-tb).count();
+    // printf("took %ld microseconds", tdiff);
   }
 };
 
@@ -216,6 +287,10 @@ int main(int argc, char **argv) {
       preview_actual.setPalette(pal);
     preview_tile.addWidget(&preview_actual, 8);
 
+    QLabel status_bar("Beat x, Sm-tick x  |  Snap x");
+    preview_tile.addWidget(&status_bar, 0);
+    preview_tile.setAlignment(&status_bar, Qt::AlignCenter);
+    
     QHBoxLayout preview_controls;
 
       QCheckBox downscroll_chk("Downscroll");
@@ -266,7 +341,7 @@ int main(int argc, char **argv) {
       preview_controls.addWidget(&cmod_slider, 1);
       preview_controls.setAlignment(&cmod_slider, Qt::AlignCenter);
     preview_tile.addLayout(&preview_controls, 1);
-  layout.addLayout(&preview_tile, 3);
+  layout.addLayout(&preview_tile, 4);
 
 
 
