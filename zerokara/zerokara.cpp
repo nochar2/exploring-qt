@@ -22,65 +22,6 @@
 
 // #include <chrono>
 
-// Ikik, you can only have one snap subdivision per measure.
-QString chart = ""
-"#TITLE:Nothing;\n"
-"#NOTES:dance-single:myself:15:Edit:0.000:\n"
-"1000\n"
-"0100\n"
-"0010\n"
-"0001\n"
-",\n"
-"1000\n"
-"0100\n"
-"0010\n"
-"0100\n"
-"0010\n"
-"0001\n"
-",\n"
-"1100\n"
-"0001\n"
-"0010\n"
-"0100\n"
-"1000\n"
-"0001\n"
-"0010\n"
-"1000\n"
-",\n"
-"0110\n"
-";";
-
-enum class GameType { DanceSingle };
-enum class DiffType { Beginner, Easy, Medium, Hard, Challenge, Edit };
-enum class NoteType { None, Tap, Hold, HRLift, Rolld, Mine, Lift, Fake };
-
-struct NoteInfo {
-  uint32_t measure;
-  uint8_t  beat; // 0..3
-  uint8_t  sm_tick; // 0..47
-  std::array<NoteType, 4>  line;
-  float seconds;
-};
-
-struct Difficulty {
-  GameType gt;
-  QString charter;
-  uint32_t diff_level;
-  DiffType diff_type;
-  QList<float> groove_values;
-  QList<NoteInfo> notes;
-};
-
-struct SmFile {
-  QString title;
-  QList<Difficulty> diffs;
-};
-
-SmFile parse(QString string) {
-  // utf-16
-  for (QChar c : string) {
-  }
-}
 
 
 
