@@ -13,6 +13,8 @@
 #include <format>
 #include <ranges>
 #include <print>
+#include <algorithm>
+#include <system_error>
 
 
 using std::array;
@@ -24,8 +26,30 @@ using namespace std::string_literals;
 
 #define eprintf(...) fprintf(stderr, __VA_ARGS__)
 
+std::string string_from_difftype(DiffType dt)
+{
+  switch (dt) {
+    case DiffType::Beginner: return "Beginner";
+    case DiffType::Easy: return "Easy";
+    case DiffType::Medium: return "Medium";
+    case DiffType::Hard: return "Hard";
+    case DiffType::Challenge: return "Challenge";
+    case DiffType::Edit: return "Edit";
+  }
+  assert(false);
+}
+std::string string_from_gametype(GameType gt)
+{
+  switch (gt) {
+    case GameType::DanceSingle: return "dance-single (4 keys)";
+    case GameType::DanceDouble: return "dance-double (8 keys)";
+  }
+  assert(false);
+}
+
+
 // Ikik, you can only have one snap subdivision per measure.
-const string CHART = ""
+const std::string CHART = ""
 "#TITLE:Short test file;\n"
 "#BPMS:0=180;\n"
 "#NOTES:dance-single:myself:Edit:15:0.000:\n"
@@ -57,20 +81,10 @@ const string CHART = ""
 ";";
 
 
-
-// enum class SmParserState {
-//   Ignoring,
-//   ReadingKey,
-//   ReadingValue,
-// }
-
-struct SmParseError {
-  string msg; // for now, just this.
-};
-
 // use holds_alternative for destructuring
 std::variant<SmFile, SmParseError>
-parse(string const& str) {
+smfile_from_string_opt(string const& str)
+{
   /*
   find hash. If not, we're done. Let's permit files that don't have a diff yet (maybe warn).
   find colon. If not, panic. If yes, translate the key to an enum and a datatype repr.
@@ -235,7 +249,7 @@ parse(string const& str) {
 
         bool end_of_difficulty = false;
         while (!end_of_difficulty) { // for each measure
-          std::vector<NoteInfo> current_measure_pre = {};
+          std::vector<NoteRow> current_measure_pre = {};
 
           bool end_of_measure = false;
           while (!end_of_measure) { // for each pattern
@@ -277,7 +291,7 @@ parse(string const& str) {
               }};
               // I don't know beat / ticks / seconds because I don't know the pattern count per measure yet
               std::println(stderr, "pushing back a line {}", line_s);
-              current_measure_pre.push_back((NoteInfo){ .measure=measure_i, .beat=0, .subbeat_ticks=0, .line=line, .seconds=0, });
+              current_measure_pre.push_back((NoteRow){ .measure=measure_i, .beat=0, .smticks=0, .sec=0, .line=line });
               break;
             }
             default:
@@ -312,9 +326,9 @@ parse(string const& str) {
           for (auto [i, m] : std::views::enumerate(current_measure_pre)) {
             if (!std::all_of(m.line.begin(), m.line.end(), [](auto x){return x == NoteType::None;})) {
               m.beat          = (uint8_t)(i * beats_per_measure * 48 / pats_per_measure);
-              m.subbeat_ticks = (uint8_t)(i * beats_per_measure * 48 % pats_per_measure);
+              m.smticks = (uint8_t)(i * beats_per_measure * 48 % pats_per_measure);
               // improvable if slow
-              m.seconds = secs_per_beat * (m.beat + m.subbeat_ticks / 48.);
+              m.sec = secs_per_beat * (m.beat + m.smticks / 48.);
               diff.note_rows.push_back(m);
             }
           }
@@ -328,22 +342,20 @@ parse(string const& str) {
   } // while (true)
 }
 
-int main(void) {
-  std::ios_base::sync_with_stdio(true);
+// int main(void) {
+//   std::ios_base::sync_with_stdio(true);
+
+  // fflush(stdout);
+  // eprintf("this is a c stream test\n");
+  // std::print(stderr, "this is a c++ print test\n");
   // fflush(stdout);
 
-  auto smfile_opt = parse(CHART);
-
-  eprintf("this is a c stream test\n");
-  std::print(stderr, "this is a c++ print test\n");
-
-
-  fflush(stdout);
-  if (std::holds_alternative<SmFile>(smfile_opt)) {
-    SmFile smfile = std::get<SmFile>(smfile_opt);
-    eprintf("got map: %s\n", smfile.title.c_str());
-  } else {
-    SmParseError error = std::get<SmParseError>(smfile_opt);
-    eprintf("%s\n", error.msg.c_str());
-  }
-}
+//   auto smfile_opt = smfile_from_string_opt(CHART);
+//   if (std::holds_alternative<SmFile>(smfile_opt)) {
+//     SmFile smfile = std::get<SmFile>(smfile_opt);
+//     eprintf("got map: %s\n", smfile.title.c_str());
+//   } else {
+//     SmParseError error = std::get<SmParseError>(smfile_opt);
+//     eprintf("%s\n", error.msg.c_str());
+//   }
+// }

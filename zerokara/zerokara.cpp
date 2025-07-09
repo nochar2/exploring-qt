@@ -1,5 +1,9 @@
 #include <QApplication>
 
+#include "qtreewidget.h"
+#include "sm_parser.h"
+
+
 // widgets
 #include <QTreeWidget>
 #include <QCheckBox>
@@ -12,6 +16,7 @@
 #include <QTextEdit>
 #include <QSlider>
 
+
 // event
 #include <QScrollEvent>
 
@@ -20,9 +25,35 @@
 #include <QPalette>
 #include <QRect>
 
+// C++
+#include <ranges>
 // #include <chrono>
 
 
+SmFile smfile;
+
+std::array<NoteType, 4> notes_from_string(const char str[4]) {
+  std::array<NoteType, 4> ret = {};
+  ret[0] = static_cast<NoteType>(str[0]);
+  ret[1] = static_cast<NoteType>(str[1]);
+  ret[2] = static_cast<NoteType>(str[2]);
+  ret[3] = static_cast<NoteType>(str[3]);
+  return ret;
+}
+
+struct NoteRowRects {
+  std::vector<QRectF> rects; // actually 1 .. 4 of them
+  QColor color;
+};
+
+
+// NoteRowRects noterowrects_from_noterow(NoteRow note_row) {
+//   NoteRowRects ret = {};
+//   ret.rects.push_back(note_row.line[0]);
+// };
+
+// who cares, everyone uses 4/4
+double ticks_per_1_(int subdiv){return 192./subdiv;};
 
 
 class NoteDisplayWidget : public QWidget {
@@ -37,10 +68,6 @@ class NoteDisplayWidget : public QWidget {
   void onDownscrollClick(Qt::CheckState ds_state) { this->downscroll = ds_state == Qt::Checked; this->update(); }
   void onCmodChange(int value) { this->cmod = value; this->update(); }
   
-  struct RectSpec {
-    QList<QRectF> rects; // actually 1 .. 4 of them
-    QColor color;
-  };
 
   protected:
   void wheelEvent(QWheelEvent *event) override {
@@ -64,22 +91,20 @@ class NoteDisplayWidget : public QWidget {
     int px_judge_line_off = 30;
     int left_start = this->width() / 2 - 2 * note_width; // for centering
 
-    // who cares, everyone uses 4/4
-    auto ticks_per_1_ = [](int subdiv){return 192./subdiv;};
 
     // 16th notes for an example. Let's assume BPM = 180, and let's assume CMOD
     // means pixels per second (which is not entirely true, it is more like assuming h == 480)
-    float bpm = 180.;
-    float secs_per_beat = 60./bpm;
-    float secs_per_smtick = secs_per_beat / 48.; // smallest subdivision in stepmania games
-    float px_per_smtick = secs_per_smtick * cmod;
+    double bpm = 180.;
+    double secs_per_beat = 60./bpm;
+    double secs_per_smtick = secs_per_beat / 48.; // smallest subdivision in stepmania games
+    double px_per_smtick = secs_per_smtick * cmod;
 
 
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
   
     // draw judge line
-    auto judge_line = QLineF(0, px_judge_line_off, this->width()-1, px_judge_line_off);
+    auto judge_line = QLine(0, px_judge_line_off, this->width()-1, px_judge_line_off);
     if (downscroll) {
       int new_y = this->height() - judge_line.y1();
       judge_line.setLine(0, new_y, this->width()-1, new_y);
@@ -97,7 +122,7 @@ class NoteDisplayWidget : public QWidget {
 
     // draw snap lines (for now, do 4ths)
     for (int i = 0; i < 10; i++) {
-      int y = px_chart_start_off + i * (px_per_smtick * ticks_per_1_(4));
+      int y = (int)(px_chart_start_off + i * (px_per_smtick * ticks_per_1_(4)));
       if (downscroll) y = this->height() - y;
       auto snap_line = QLineF(left_start, y, left_start + 4 * note_width, y);
       pen.setWidth(1); pen.setColor(Qt::red); painter.setPen(pen);
@@ -105,69 +130,84 @@ class NoteDisplayWidget : public QWidget {
     }
 
 
-    auto rectangles_at_smtick_pos = [=](int n_beats, int n_smticks, int column_mask){
-      n_smticks += n_beats * 48;
+    std::function<NoteRowRects(NoteRow)> rectangles_at_smtick_pos = [&](NoteRow row /*, int32_t left_start, int32_t note_width, int32_t note_height, double px_per_smtick, double px_chart_start_off */){
+      // at least for now
+      uint32_t smticks = row.smticks + row.beat * 48 + row.measure * 48 * 4;
 
-      assert(0 <= column_mask && column_mask <= 15);
-      QList<QPair<int,QColor>> snap_pairs = {
-        QPair((192/4),  QColorConstants::Red),
-        QPair((192/8),  QColorConstants::Blue),
-        QPair((192/12), QColorConstants::Green),
-        QPair((192/16), QColorConstants::Yellow),
-        QPair((192/24), QColorConstants::DarkMagenta),
-        QPair((192/32), QColorConstants::Svg::orange),
-        QPair((192/48), QColorConstants::Cyan),
+      // assert(0 <= column_mask && column_mask <= 15);
+      std::vector<std::pair<uint32_t,QColor>> snap_pairs = {
+        { (192/4),  QColorConstants::Red },
+        { (192/8),  QColorConstants::Blue },
+        { (192/12), QColorConstants::Green },
+        { (192/16), QColorConstants::Yellow },
+        { (192/24), QColorConstants::DarkMagenta },
+        { (192/32), QColorConstants::Svg::orange },
+        { (192/48), QColorConstants::Cyan },
       };
 
-      auto line = (RectSpec){
+      auto line = (NoteRowRects){
         .rects = {},
         .color = QColorConstants::Gray
       };
 
-      for (int i = 8, column_i = 0; i > 0; i /= 2, column_i += 1) {
-        if (column_mask & i) {
+      // for (int i = 8, column_i = 0; i > 0; i /= 2, column_i += 1) {
+      for (size_t i = 0; i < 4; i++) {
+        if (row.line[i] == NoteType::Tap) {
           line.rects.push_back(
-            QRectF(left_start + note_width * column_i, px_chart_start_off + px_per_smtick * n_smticks, note_width, note_height)
+            QRectF(left_start + note_width * (int32_t)i, px_chart_start_off + px_per_smtick * smticks, note_width, note_height)
           );
         }
       }
 
       for (auto [snap, col] : snap_pairs) {
-        if (n_smticks % snap == 0) { line.color = col; return line; }
+        if (smticks % snap == 0) { line.color = col; return line; }
       }
       return line;
     };
 
 
     // whatever name for 1..4 notes at one place
-    auto patterns = {
-      rectangles_at_smtick_pos(0, (int)(ticks_per_1_(16))*0,  0b1000),
-      rectangles_at_smtick_pos(0, (int)(ticks_per_1_(16))*1,  0b0100),
-      rectangles_at_smtick_pos(0, (int)(ticks_per_1_(16))*2,  0b0010),
-      rectangles_at_smtick_pos(0, (int)(ticks_per_1_(16))*3,  0b0001),
+    std::vector<NoteRow>& note_rows = smfile.diffs[0].note_rows;
 
-      rectangles_at_smtick_pos(1, (int)(ticks_per_1_(24))*0,  0b1000),
-      rectangles_at_smtick_pos(1, (int)(ticks_per_1_(24))*1,  0b0100),
-      rectangles_at_smtick_pos(1, (int)(ticks_per_1_(24))*2,  0b0010),
-      rectangles_at_smtick_pos(1, (int)(ticks_per_1_(24))*3,  0b0100),
-      rectangles_at_smtick_pos(1, (int)(ticks_per_1_(24))*4,  0b0010),
-      rectangles_at_smtick_pos(1, (int)(ticks_per_1_(24))*5,  0b0001),
 
-      rectangles_at_smtick_pos(2, (int)(ticks_per_1_(32))*0,  0b1100),
-      rectangles_at_smtick_pos(2, (int)(ticks_per_1_(32))*1,  0b0001),
-      rectangles_at_smtick_pos(2, (int)(ticks_per_1_(32))*2,  0b0010),
-      rectangles_at_smtick_pos(2, (int)(ticks_per_1_(32))*3,  0b0100),
-      rectangles_at_smtick_pos(2, (int)(ticks_per_1_(32))*4,  0b1000),
-      rectangles_at_smtick_pos(2, (int)(ticks_per_1_(32))*5,  0b0001),
-      rectangles_at_smtick_pos(2, (int)(ticks_per_1_(32))*6,  0b0010),
-      rectangles_at_smtick_pos(2, (int)(ticks_per_1_(32))*7,  0b1000),
+    // std::vector<NoteRow> note_rows = {
+    //   (NoteRow){.measure=0, .beat=0, .smticks=(uint8_t)(ticks_per_1_(16)*0), .sec=0., .line=notes_from_string("1111")},
+    //   (NoteRow){.measure=0, .beat=0, .smticks=(uint8_t)(ticks_per_1_(16)*1), .sec=0., .line=notes_from_string("0100")},
+    //   (NoteRow){.measure=0, .beat=0, .smticks=(uint8_t)(ticks_per_1_(16)*2), .sec=0., .line=notes_from_string("0010")},
+    //   (NoteRow){.measure=0, .beat=0, .smticks=(uint8_t)(ticks_per_1_(16)*3), .sec=0., .line=notes_from_string("0001")},
+    // };
 
-      rectangles_at_smtick_pos(3, (int)(ticks_per_1_(32))*0,  0b0110),
-    };
+    std::vector<NoteRowRects> rectangles;
+    std::transform(note_rows.begin(), note_rows.end(), std::back_inserter(rectangles), [&](NoteRow nr) {return rectangles_at_smtick_pos(nr);});
+
+    // std::vector<NoteRowRects> rectangles = {
+    //   rectangles_at_smtick_pos(0, (int)(ticks_per_1_(16))*0,  0b1111),
+    //   rectangles_at_smtick_pos(0, (int)(ticks_per_1_(16))*1,  0b0100),
+    //   rectangles_at_smtick_pos(0, (int)(ticks_per_1_(16))*2,  0b0010),
+    //   rectangles_at_smtick_pos(0, (int)(ticks_per_1_(16))*3,  0b0001),
+
+    //   rectangles_at_smtick_pos(1, (int)(ticks_per_1_(24))*0,  0b1000),
+    //   rectangles_at_smtick_pos(1, (int)(ticks_per_1_(24))*1,  0b0100),
+    //   rectangles_at_smtick_pos(1, (int)(ticks_per_1_(24))*2,  0b0010),
+    //   rectangles_at_smtick_pos(1, (int)(ticks_per_1_(24))*3,  0b0100),
+    //   rectangles_at_smtick_pos(1, (int)(ticks_per_1_(24))*4,  0b0010),
+    //   rectangles_at_smtick_pos(1, (int)(ticks_per_1_(24))*5,  0b0001),
+
+    //   rectangles_at_smtick_pos(2, (int)(ticks_per_1_(32))*0,  0b1100),
+    //   rectangles_at_smtick_pos(2, (int)(ticks_per_1_(32))*1,  0b0001),
+    //   rectangles_at_smtick_pos(2, (int)(ticks_per_1_(32))*2,  0b0010),
+    //   rectangles_at_smtick_pos(2, (int)(ticks_per_1_(32))*3,  0b0100),
+    //   rectangles_at_smtick_pos(2, (int)(ticks_per_1_(32))*4,  0b1000),
+    //   rectangles_at_smtick_pos(2, (int)(ticks_per_1_(32))*5,  0b0001),
+    //   rectangles_at_smtick_pos(2, (int)(ticks_per_1_(32))*6,  0b0010),
+    //   rectangles_at_smtick_pos(2, (int)(ticks_per_1_(32))*7,  0b1000),
+
+    //   rectangles_at_smtick_pos(3, (int)(ticks_per_1_(32))*0,  0b0110),
+    // };
 
     QRectF cont_rect = this->contentsRect();
 
-    for (auto pat : patterns) {
+    for (auto pat : rectangles) {
       for (auto rect : pat.rects) {
         if (downscroll) {
           // printf("cont_rect h: %d, rect_y: %g, rect_h: %g\n",
@@ -184,11 +224,13 @@ class NoteDisplayWidget : public QWidget {
     // auto tdiff = std::chrono::duration_cast<std::chrono::microseconds>(te-tb).count();
     // printf("took %ld microseconds", tdiff);
   }
+  
 };
 
 
 int main(int argc, char **argv) {
   QApplication app(argc, argv);
+
   // -- this alone works
   // QFrame frame; frame.show();
   // -- even this alone works
@@ -196,26 +238,82 @@ int main(int argc, char **argv) {
   // -- this shows running thing on taskbar but there is no window
   // QWindow win; win.show();
 
-  QWidget root;
+
+  // parse the smfile
+  auto smfile_opt = smfile_from_string_opt(CHART);
+  assert (std::holds_alternative<SmFile>(smfile_opt));
+  smfile = std::get<SmFile>(smfile_opt);
+
+
+  QWidget w_root;
 
   QTreeWidget tree;
-  tree.setColumnCount(1);
-  tree.setHeaderHidden(true);
-  QTreeWidgetItem item(&tree); item.setText(0, "Parent");
-  QTreeWidgetItem child(&item); child.setText(0, "Child");
-  // -- must be already in the QTreeWidget,
-  // -- https://doc.qt.io/qt-6/qtreewidgetitem.html#setExpanded
-  item.setExpanded(true);
+  tree.setColumnCount(2);
 
-  QHBoxLayout layout(&root);
+  tree.setHeaderHidden(true);
+  QTreeWidgetItem t_root(&tree); t_root.setText(0, "SmFile");
+
+  QTreeWidgetItem t_meta; t_meta.setText(0, "Metadata"); t_root.addChild(&t_meta);
+
+  QTreeWidgetItem t_title;
+  t_title.setText(0, "#TITLE");
+  t_title.setText(1, QString(smfile.title.c_str()));
+  t_meta.addChild(&t_title);
+
+  QTreeWidgetItem t_bpms; t_bpms.setText(0, "#BPMS"); t_meta.addChild(&t_bpms);
+
+  QList<QTreeWidgetItem *> t_bpm_list;
+  for (auto time_bpm : smfile.bpms) {
+    // -- don't care, let's just malloc it
+    auto *t_bpm = new QTreeWidgetItem();
+    t_bpm->setText(0, QString::number(time_bpm.beat_number));
+    // t_bpm->setText(1, QString::number(time_bpm.value, 'f', 3));
+    t_bpm->setText(1, QString::number(time_bpm.value));
+    t_bpm_list.push_back(t_bpm);
+  }
+  t_bpms.addChildren(t_bpm_list);
+  // tree.resizeColumnToContents(1);
+
+  QTreeWidgetItem t_diffs;
+  t_diffs.setText(0, "Difficulties");
+  t_root.addChild(&t_diffs);
+  for (auto [i, diff] : std::views::enumerate(smfile.diffs)) {
+    auto *t_diff = new QTreeWidgetItem(&t_diffs);
+    // t_diff->setText(0, QString("%1, %2").arg(string_from_difftype(diff.diff_type)).arg(diff.diff_num));
+    t_diff->setText(0, QString::number(i));
+
+    auto *t_difftype = new QTreeWidgetItem(t_diff);
+    t_difftype->setText(0, "Game type");
+    t_difftype->setText(1, string_from_gametype(diff.game_type).c_str());
+
+
+    auto *t_notes = new QTreeWidgetItem(t_diff);
+    t_notes->setText(0, "Note rows");
+    for (auto [i, note] : std::views::enumerate(diff.note_rows)) {
+      auto *t_note = new QTreeWidgetItem(t_notes);
+      t_note->setText(0, QString("%1/%2/%3").arg(note.measure).arg(note.beat).arg(note.smticks));
+      t_note->setText(1, QString("%1%2%3%4")
+                      .arg((char)note.line[0])
+                      .arg((char)note.line[1])
+                      .arg((char)note.line[2])
+                      .arg((char)note.line[3]));
+    }
+  }
+  tree.expandAll();
+  tree.resizeColumnToContents(0);
+
+
+  // -- must be already in the QTreeWidget (https://doc.qt.io/qt-6/qtreewidgetitem.html#setExpanded)
+
+  QHBoxLayout layout(&w_root);
   
-  layout.addWidget(&tree, 1);
+  layout.addWidget(&tree, 5);
   // -- QLabel label; label.setText("Hi world"); label.setAlignment(Qt::AlignCenter);
   // -- layout.addWidget(&label, 3);
   QTextEdit viewer;
   viewer.setReadOnly(true);
   viewer.setText("A bunch of random text\nthat spans\na couple lines");
-  layout.addWidget(&viewer, 2);
+  // layout.addWidget(&viewer, 2);
 
 
   // You can't scope these, they need to live. Also, if you make them static, it aborts on exit
@@ -285,16 +383,10 @@ int main(int argc, char **argv) {
   layout.addLayout(&preview_tile, 4);
 
 
+  w_root.show();
 
 
 
 
-  root.show();
-
-  // -- they are all like 40 bytes
-  // printf("root takes %zu bytes\n", sizeof root);
-  // printf("tree takes %zu bytes\n", sizeof tree);
-  // printf("label takes %zu bytes\n", sizeof label);
-  // printf("layout takes %zu bytes\n", sizeof layout);
   return app.exec();
 }
