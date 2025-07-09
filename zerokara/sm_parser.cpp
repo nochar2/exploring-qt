@@ -1,18 +1,18 @@
 // #include <QString>
 // #include <QList>
 
+
+#include "sm_parser.h"
+
+#include <cassert>
 #include <cstdint>
 #include <string>
-#include <algorithm>
 #include <array>
 #include <vector>
-#include <cstring>
 #include <variant>
-#include <charconv>
-#include <ranges>
-#include <cassert>
 #include <format>
-// #include <chrono>
+#include <ranges>
+#include <print>
 
 
 using std::array;
@@ -22,9 +22,12 @@ using std::vector;
 // using namespace std::chrono_literals;
 using namespace std::string_literals;
 
+#define eprintf(...) fprintf(stderr, __VA_ARGS__)
+
 // Ikik, you can only have one snap subdivision per measure.
-string chart = ""
+const string CHART = ""
 "#TITLE:Short test file;\n"
+"#BPMS:0=180;\n"
 "#NOTES:dance-single:myself:Edit:15:0.000:\n"
 "1000\n"
 "0100\n"
@@ -53,61 +56,7 @@ string chart = ""
 "0000\n"
 ";";
 
-enum class GameType { DanceSingle, DanceDouble };
-enum class DiffType { Beginner, Easy, Medium, Hard, Challenge, Edit };
-enum class NoteType {
-  None   = '0',
-  Tap    = '1',
-  Hold   = '2',
-  HRLift = '3',
-  Rolld  = '4',
-  Mine   = 'M',
-  Lift   = 'L',
-  Fake   = 'F',
-};
 
-// -- this doesn't work :(
-// -- and there's some other variant with throw which works but the error msg is garbage
-// template <uint8_t max>
-// struct Fin {
-//   uint8_t n;
-//   consteval Fin(uint8_t n_raw) : n(n_raw) {
-//     if (n_raw >= max) { static_assert(false, "Value is outside of the Fin range"); }
-//   }
-// };
-struct NoteInfo {
-  uint32_t measure;
-  uint8_t beat; // 0..3, possibly more
-  uint8_t subbeat_ticks; // 0..47
-  std::array<NoteType, 4>  line;
-  double seconds;
-};
-
-struct Difficulty {
-  GameType game_type;
-  std::string charter;
-  DiffType diff_type;
-  uint32_t diff_num;
-  std::vector<double> groove_values;
-  std::vector<NoteInfo> note_rows;
-};
-
-struct TimeKV {
-  double beat_number;
-  double value;
-};
-
-struct SmFile {
-  std::string title;
-  std::vector<TimeKV> bpms;
-  std::vector<Difficulty> diffs;
-};
-
-enum class SmField {
-  Title,
-  /* the #NOTES: field, but that is misleading since there's still metadata */
-  Difficulty
-};
 
 // enum class SmParserState {
 //   Ignoring,
@@ -134,28 +83,53 @@ parse(string const& str) {
   /* let's use the C api instead */
 
   // const char *last_semi_pos = str.c_str();
-  size_t value_len;
+  // size_t value_len;
 
   std::string_view sv(str);
 
   while (true) {
-    // const char *hash_pos = strchr(last_semi_pos, '#');
     size_t hash_pos = sv.find('#');
     if (hash_pos == string::npos) return smfile;
+
     size_t junk_len = hash_pos;
-    sv.remove_prefix(junk_len + 1);
+    sv.remove_prefix(junk_len + 1); // eat the # also
 
     size_t colon_pos = sv.find(':');
     if (colon_pos == string::npos) { return (SmParseError){.msg="While reading a new key: EOF"s}; }
-    size_t key_len = colon_pos;
+
     if (false) {
-    } else if (sv.starts_with("TITLE")) {
+    } else if (sv.starts_with("TITLE:")) {
       sv.remove_prefix(colon_pos + 1);
       size_t semi_pos = sv.find(';');
       if (semi_pos == string::npos) { return (SmParseError){.msg="While reading #TITLE: EOF"s}; }
-      value_len = semi_pos;
-      smfile.title = std::string(sv.data(), value_len);
-    } else if (sv.starts_with("NOTES")) {
+
+      size_t title_len = semi_pos;
+      smfile.title = std::string(sv.data(), title_len);
+
+    } else if (sv.starts_with("BPMS:")) {
+      sv.remove_prefix(colon_pos + 1);
+      size_t semi_pos = sv.find(';');
+      eprintf("semi pos: %ld\n", semi_pos);
+      if (semi_pos == string::npos) { return (SmParseError){.msg="While reading #BPMS: EOF"s}; }
+      // TODO: actually parse _key=val_,_key=val_,_key=val_; list (_ == possible space)
+      string_view bpms_sv = sv.substr(0, semi_pos);
+      std::println(stderr, "bpms sv is: {}", bpms_sv);
+
+      std::vector<TimeKV> bpms;
+      for (auto kv_s : bpms_sv | std::views::split(',')) {
+        double time, bpm;
+        int matched = sscanf(kv_s.data(), " %lf=%lf", &time, &bpm);
+        if (matched != 2) {
+          // not super robust but let's move on for now
+          eprintf("While reading #NOTES/BPMS: Couldn't parse float\n");
+        } else {
+          bpms.push_back(TimeKV(time, bpm));
+        }
+      }
+      smfile.bpms = bpms;
+
+    } else if (sv.starts_with("NOTES:")) {
+      sv.remove_prefix(colon_pos + 1);
 
       Difficulty diff;
       size_t sentinel_pos;
@@ -164,7 +138,7 @@ parse(string const& str) {
         sentinel_pos = sv.find(':'); if (sentinel_pos == string::npos) {
           return (SmParseError) {.msg="While reading #NOTES/GameType: EOF"s};
         }
-        string game_type = string(sv.data(), sentinel_pos);
+        string_view game_type = sv.substr(0, sentinel_pos);
         if (false) {}
         else if (game_type == "dance-single") { diff.game_type = GameType::DanceSingle; }
         else if (game_type == "dance-double") { diff.game_type = GameType::DanceDouble; }
@@ -195,7 +169,7 @@ parse(string const& str) {
         else if (diff_type_s == "Challenge") { diff.diff_type = DiffType::Challenge; }
         else if (diff_type_s == "Edit")      { diff.diff_type = DiffType::Edit; }
         else {
-          return (SmParseError) {.msg=std::format("While reading #NOTES/DiffType: Unknown DiffType {}", diff_type_s)};
+          return (SmParseError) {.msg="While reading #NOTES/DiffType: Unknown DiffType " + string(diff_type_s)};
           // TODO: this is not actually error. Maybe make it return a list of warnings instead.
         };
         sv.remove_prefix(sentinel_pos + 1);
@@ -209,7 +183,7 @@ parse(string const& str) {
         uint32_t num;
         auto err = std::from_chars(diff_num_s.data(), diff_num_s.data() + diff_num_s.size(), num);
         if (err.ec != std::errc{}) {
-          return (SmParseError) {.msg=std::format("While reading #NOTES/DiffNum: Not a number: {}", diff_num_s)};
+          return (SmParseError) {.msg="While reading #NOTES/DiffNum: Not a number: " + string(diff_num_s)};
         }
         diff.diff_num = num;
         sv.remove_prefix(sentinel_pos + 1);
@@ -221,12 +195,11 @@ parse(string const& str) {
         }
         string_view groove_values_s = sv.substr(0, sentinel_pos);
         std::vector<double> gvs;
-
         for (auto gvr : groove_values_s | std::views::split(':')) {
           double gv;
           auto err = std::from_chars(gvr.begin(), gvr.end(), gv);
           if (err.ec != std::errc()) { // errc() means success
-            return (SmParseError) {.msg=std::format("While reading #NOTES/GrooveValues: Not a float: {}", gvr.data())};
+            return (SmParseError) {.msg="While reading #NOTES/GrooveValues: Not a float: " + string(gvr.data())};
           }
           gvs.push_back(gv);
         }
@@ -257,30 +230,33 @@ parse(string const& str) {
         // eat_while_n("01234MLF", 4)
 
 
-        bool end_of_diff = false;
-        bool end_of_measure = false;
 
-        for (uint32_t measure_i = 0; !end_of_diff; measure_i++) {
-          std::vector<NoteInfo> current_measure_pre;
+        uint32_t measure_i = 0;
 
-          for (uint32_t pat_i = 0; !end_of_measure; pat_i++) {
-            size_t end_of_line;
+        bool end_of_difficulty = false;
+        while (!end_of_difficulty) { // for each measure
+          std::vector<NoteInfo> current_measure_pre = {};
+
+          bool end_of_measure = false;
+          while (!end_of_measure) { // for each pattern
+            const size_t &pat_i = current_measure_pre.size();
+            // fflush(stdout);
 
             switch (sv[0]) {
-            case ',':  end_of_measure = true; break;
-            case ';':  end_of_measure = true; end_of_diff = true; break;
+            case ',':  sv.remove_prefix(1); end_of_measure = true; break;
+            case ';':  sv.remove_prefix(1); end_of_measure = true; end_of_difficulty = true; break;
             case '/':  // pretend it's //, I don't care
-              end_of_line = sv.find('\n');
-              sv.remove_prefix(end_of_line);
+              size_t end_of_line;
+              end_of_line = sv.find('\n'); sv.remove_prefix(end_of_line + 1);
               break;
             case '\0':
               return (SmParseError) {.msg=std::format(
-                "While reading #Notes/NoteRows: Measure #{}: Unexpected EOF (no semicolon reeeee)", measure_i
+                "While reading #Notes/NoteRows: Measure #{}: Unexpected EOF (missing semicolon?)", measure_i
               )};
             case ' ': case '\t': case '\r': case '\n':
               sv.remove_prefix(1);
-              continue;
-            case '0': case '1': case '2': case '3': case '4': case 'M': case 'L': case 'F':
+              break;
+            case '0' ... '4': case 'M': case 'L': case 'F':
             {
               size_t pat_len = sv.find_first_not_of("01234MLF");
               string_view line_s = sv.substr(0, pat_len);
@@ -289,7 +265,7 @@ parse(string const& str) {
                 return (SmParseError) {.msg=std::format(
                    "While reading #Notes/NoteRows: Measure #{}, pattern #{}: Expected ({}) to consist of "
                    "exactly 4 symbols 01234MLF",
-                   measure_i, pat_i, line_s
+                   measure_i, current_measure_pre.size(), line_s
                   )
                 };
               }
@@ -300,6 +276,7 @@ parse(string const& str) {
                 static_cast<NoteType>(line_s[3]),
               }};
               // I don't know beat / ticks / seconds because I don't know the pattern count per measure yet
+              std::println(stderr, "pushing back a line {}", line_s);
               current_measure_pre.push_back((NoteInfo){ .measure=measure_i, .beat=0, .subbeat_ticks=0, .line=line, .seconds=0, });
               break;
             }
@@ -308,44 +285,65 @@ parse(string const& str) {
                  "While reading #Notes/NoteRows: Measure #{}, pattern #{}: Garbage starting with {}",
                  measure_i, pat_i, sv.substr(0, std::min(10UL,sv.size()))
                 )
-              };
-            
-          }
+              }; 
+            }
+          } // for all patterns in measure
 
-          /* Although you might want to assert that everything is 4/4 by now, I don't want to bake
-          the assumption into a poor implementation. So 
-          */
+          std::println(stderr, "remaining sv is {}", sv);
+          fflush(stdout);
+            
+          // Resolve the timing info.
           uint32_t beats_per_measure = 4; // 99.99999 % of all charts
           auto b = beats_per_measure;
           uint32_t pats_per_measure = (uint32_t)current_measure_pre.size();
+          assert(pats_per_measure != 0); // for now
+
           array<size_t, 10> common_ppm = {b, 2*b, 3*b, 4*b, 6*b, 8*b, 12*b, 16*b, 24*b, 48*b};
           if (pats_per_measure % b != 0) {
             // return (SmParseError){.msg=std::format(
-              fprintf(stderr, "W: While reading #Notes/NoteRows: Measure %u has number of rows %u, which is not divisible by time signature %u/4.",
+              eprintf("W: While reading #Notes/NoteRows: Measure %u has number of rows %u, which is not divisible by time signature %u/4.\n",
               measure_i, pats_per_measure, beats_per_measure);
             // };
           } else if (std::none_of(common_ppm.begin(), common_ppm.end(), [&](auto x){ return pats_per_measure == x; })) {
-              fprintf(stderr, "W: While reading #Notes/NoteRows: Measure %u has an unusual number of rows %u",
+              eprintf("W: While reading #Notes/NoteRows: Measure %u has an unusual number of rows %u\n",
               measure_i, pats_per_measure);
           }
 
-
-          // vector<NoteInfo> current_measure;
           for (auto [i, m] : std::views::enumerate(current_measure_pre)) {
             if (!std::all_of(m.line.begin(), m.line.end(), [](auto x){return x == NoteType::None;})) {
               m.beat          = (uint8_t)(i * beats_per_measure * 48 / pats_per_measure);
               m.subbeat_ticks = (uint8_t)(i * beats_per_measure * 48 % pats_per_measure);
-              // improvable
+              // improvable if slow
               m.seconds = secs_per_beat * (m.beat + m.subbeat_ticks / 48.);
               diff.note_rows.push_back(m);
             }
           }
-        }
-        fprintf(stderr, "I: Parsed a diff with %lu notes\n", diff.note_rows.size());
+          measure_i += 1;
+        } // for all measures
+
+        eprintf("I: Parsed a diff with %lu noterows\n", diff.note_rows.size());
         smfile.diffs.push_back(diff);
-      }
-      fprintf(stderr, "I: Returning smfile with %lu diffs\n", smfile.diffs.size());
-      return smfile;
-    }
+      } // (NoteInfo parsing scope)
+    } // else if (sv.starts_with("#NOTES")) {
+  } // while (true)
+}
+
+int main(void) {
+  std::ios_base::sync_with_stdio(true);
+  // fflush(stdout);
+
+  auto smfile_opt = parse(CHART);
+
+  eprintf("this is a c stream test\n");
+  std::print(stderr, "this is a c++ print test\n");
+
+
+  fflush(stdout);
+  if (std::holds_alternative<SmFile>(smfile_opt)) {
+    SmFile smfile = std::get<SmFile>(smfile_opt);
+    eprintf("got map: %s\n", smfile.title.c_str());
+  } else {
+    SmParseError error = std::get<SmParseError>(smfile_opt);
+    eprintf("%s\n", error.msg.c_str());
   }
 }
