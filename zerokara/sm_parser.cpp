@@ -290,7 +290,7 @@ smfile_from_string_opt(string const& str)
                 static_cast<NoteType>(line_s[3]),
               }};
               // I don't know beat / ticks / seconds because I don't know the pattern count per measure yet
-              std::println(stderr, "pushing back a line {}", line_s);
+              // std::println(stderr, "pushing back a line {}", line_s);
               current_measure_pre.push_back((NoteRow){ .measure=measure_i, .beat=0, .smticks=0, .sec=0, .line=line });
               break;
             }
@@ -303,15 +303,15 @@ smfile_from_string_opt(string const& str)
             }
           } // for all patterns in measure
 
-          std::println(stderr, "remaining sv is {}", sv);
-          fflush(stdout);
+          // std::println(stderr, "remaining sv is {}", sv);
+          // fflush(stdout);
             
           // Resolve the timing info.
           uint32_t beats_per_measure = 4; // 99.99999 % of all charts
-          auto b = beats_per_measure;
           uint32_t pats_per_measure = (uint32_t)current_measure_pre.size();
           assert(pats_per_measure != 0); // for now
 
+          auto b = beats_per_measure;
           array<size_t, 10> common_ppm = {b, 2*b, 3*b, 4*b, 6*b, 8*b, 12*b, 16*b, 24*b, 48*b};
           if (pats_per_measure % b != 0) {
             // return (SmParseError){.msg=std::format(
@@ -325,8 +325,8 @@ smfile_from_string_opt(string const& str)
 
           for (auto [i, m] : std::views::enumerate(current_measure_pre)) {
             if (!std::all_of(m.line.begin(), m.line.end(), [](auto x){return x == NoteType::None;})) {
-              m.beat          = (uint8_t)(i * beats_per_measure * 48 / pats_per_measure);
-              m.smticks = (uint8_t)(i * beats_per_measure * 48 % pats_per_measure);
+              m.beat    = (uint8_t)((i * beats_per_measure * 48 / pats_per_measure) / 48);
+              m.smticks = (uint8_t)((i * beats_per_measure * 48 / pats_per_measure) % 48);
               // improvable if slow
               m.sec = secs_per_beat * (m.beat + m.smticks / 48.);
               diff.note_rows.push_back(m);

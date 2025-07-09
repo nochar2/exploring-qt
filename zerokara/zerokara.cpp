@@ -32,6 +32,24 @@
 
 SmFile smfile;
 
+QColor qcolor_from_smticks(uint8_t smticks) {
+  assert(smticks < 48);
+
+  std::vector<std::pair<uint32_t,QColor>> snap_to_color = {
+    { (192/4),  QColorConstants::Red },
+    { (192/8),  QColorConstants::Blue },
+    { (192/12), QColorConstants::Green },
+    { (192/16), QColorConstants::Yellow },
+    { (192/24), QColorConstants::DarkMagenta },
+    { (192/32), QColorConstants::Svg::orange },
+    { (192/48), QColorConstants::Cyan },
+  };
+  for (auto [s,c] : snap_to_color) {
+    if (smticks % s == 0) return c;
+  }
+  return QColorConstants::Gray;
+}
+
 std::array<NoteType, 4> notes_from_string(const char str[4]) {
   std::array<NoteType, 4> ret = {};
   ret[0] = static_cast<NoteType>(str[0]);
@@ -130,37 +148,25 @@ class NoteDisplayWidget : public QWidget {
     }
 
 
-    std::function<NoteRowRects(NoteRow)> rectangles_at_smtick_pos = [&](NoteRow row /*, int32_t left_start, int32_t note_width, int32_t note_height, double px_per_smtick, double px_chart_start_off */){
-      // at least for now
-      uint32_t smticks = row.smticks + row.beat * 48 + row.measure * 48 * 4;
-
-      // assert(0 <= column_mask && column_mask <= 15);
-      std::vector<std::pair<uint32_t,QColor>> snap_pairs = {
-        { (192/4),  QColorConstants::Red },
-        { (192/8),  QColorConstants::Blue },
-        { (192/12), QColorConstants::Green },
-        { (192/16), QColorConstants::Yellow },
-        { (192/24), QColorConstants::DarkMagenta },
-        { (192/32), QColorConstants::Svg::orange },
-        { (192/48), QColorConstants::Cyan },
-      };
+    std::function<NoteRowRects(NoteRow)>
+    rectangles_at_smtick_pos = [&](NoteRow row)
+    {
+      /*, int32_t left_start, int32_t note_width, int32_t note_height, double px_per_smtick, double px_chart_start_off */
+      uint32_t global_smticks = row.smticks + row.beat * 48 + row.measure * 48 * 4;
 
       auto line = (NoteRowRects){
         .rects = {},
-        .color = QColorConstants::Gray
+        .color = qcolor_from_smticks(row.smticks)
       };
 
-      // for (int i = 8, column_i = 0; i > 0; i /= 2, column_i += 1) {
       for (size_t i = 0; i < 4; i++) {
         if (row.line[i] == NoteType::Tap) {
           line.rects.push_back(
-            QRectF(left_start + note_width * (int32_t)i, px_chart_start_off + px_per_smtick * smticks, note_width, note_height)
+            QRectF(left_start + note_width * (int32_t)i,
+                   px_chart_start_off + px_per_smtick * global_smticks,
+                   note_width, note_height)
           );
         }
-      }
-
-      for (auto [snap, col] : snap_pairs) {
-        if (smticks % snap == 0) { line.color = col; return line; }
       }
       return line;
     };
@@ -297,6 +303,11 @@ int main(int argc, char **argv) {
                       .arg((char)note.line[1])
                       .arg((char)note.line[2])
                       .arg((char)note.line[3]));
+      QColor snap_color = qcolor_from_smticks(note.smticks);
+      snap_color.setAlpha(30); // 0 is fully transparent
+      QBrush brush(snap_color);
+
+      t_note->setBackground(1, brush);
     }
   }
   tree.expandAll();
