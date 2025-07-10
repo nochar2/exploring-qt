@@ -15,6 +15,8 @@
 #include <QLabel>
 #include <QTextEdit>
 #include <QSlider>
+#include <fstream>
+#include <sstream>
 
 
 // event
@@ -27,12 +29,13 @@
 
 // C++
 #include <ranges>
+#include <print>
 // #include <chrono>
 
 
 SmFile smfile;
 
-QColor qcolor_from_smticks(uint8_t smticks) {
+QColor qcolor_from_smticks(uint32_t smticks) {
   assert(smticks < 48);
 
   std::vector<std::pair<uint32_t,QColor>> snap_to_color = {
@@ -89,6 +92,7 @@ class NoteDisplayWidget : public QWidget {
 
   protected:
   void wheelEvent(QWheelEvent *event) override {
+    // -- TODO: move by snap, not by 30 pixels.
     if (event->angleDelta().ry() > 0) {
       // printf("scrollev, delta > 0\n");
       px_chart_start_off += 30;
@@ -100,26 +104,25 @@ class NoteDisplayWidget : public QWidget {
   };
 
   void paintEvent(QPaintEvent *event) override {
-    // auto tb = std::chrono::system_clock().now();
-
     (void) event;
     
-    int note_width  = 60;
-    int note_height = 20;
-    int px_judge_line_off = 30;
-    int left_start = this->width() / 2 - 2 * note_width; // for centering
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
 
 
-    // 16th notes for an example. Let's assume BPM = 180, and let's assume CMOD
-    // means pixels per second (which is not entirely true, it is more like assuming h == 480)
-    double bpm = 180.;
+    uint32_t note_width  = 60;
+    uint32_t note_height = 20;
+    int32_t px_judge_line_off = 30;
+    int32_t left_start = this->width() / 2 - (int32_t)(2 * note_width); // for centering
+
+    // -- TODO: again we assume one BPM only for now
+    // -- TODO: also this is obsolete and should be seconds-based
+    double bpm = smfile.bpms[0].value;
     double secs_per_beat = 60./bpm;
     double secs_per_smtick = secs_per_beat / 48.; // smallest subdivision in stepmania games
     double px_per_smtick = secs_per_smtick * cmod;
 
 
-    QPainter painter(this);
-    painter.setRenderHint(QPainter::Antialiasing);
   
     // draw judge line
     auto judge_line = QLine(0, px_judge_line_off, this->width()-1, px_judge_line_off);
@@ -246,8 +249,18 @@ int main(int argc, char **argv) {
 
 
   // parse the smfile
-  auto smfile_opt = smfile_from_string_opt(CHART);
-  assert (std::holds_alternative<SmFile>(smfile_opt));
+  
+  std::ifstream file("ext/Shannon's Theorem.sm");
+  std::ostringstream ss;
+  ss << file.rdbuf();
+  auto smfile_opt = smfile_from_string_opt(ss.str());
+
+  if (!std::holds_alternative<SmFile>(smfile_opt)) {
+    auto err = std::get<SmParseError>(smfile_opt);
+    std::print("{}\n", err.msg);
+    assert(false);
+  }
+
   smfile = std::get<SmFile>(smfile_opt);
 
 
@@ -303,10 +316,15 @@ int main(int argc, char **argv) {
                       .arg((char)note.line[1])
                       .arg((char)note.line[2])
                       .arg((char)note.line[3]));
+
+      // t_note->setTextAlignment()
+      // QFont font;
+      // t_note->setFont(int column, const QFont &afont)
+      
+      // -- kinda ugly, but coloring parts of text seems nearly impossible (there is like QStyledItemDelegate with no sane examples)
       QColor snap_color = qcolor_from_smticks(note.smticks);
       snap_color.setAlpha(30); // 0 is fully transparent
       QBrush brush(snap_color);
-
       t_note->setBackground(1, brush);
     }
   }

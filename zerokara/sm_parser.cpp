@@ -15,6 +15,7 @@
 #include <print>
 #include <algorithm>
 #include <system_error>
+#include <chrono>
 
 
 using std::array;
@@ -93,6 +94,7 @@ smfile_from_string_opt(string const& str)
   */
 
   SmFile smfile {};
+  auto tb = std::chrono::system_clock::now();
 
   /* let's use the C api instead */
 
@@ -103,7 +105,13 @@ smfile_from_string_opt(string const& str)
 
   while (true) {
     size_t hash_pos = sv.find('#');
-    if (hash_pos == string::npos) return smfile;
+    if (hash_pos == string::npos) {
+
+      auto te = std::chrono::system_clock::now();
+      auto us = std::chrono::duration_cast<std::chrono::microseconds>(te-tb).count();
+      std::print(stderr, "Parsed an SmFile in {} seconds", (double)us / 1000000.);
+      return smfile;
+    }
 
     size_t junk_len = hash_pos;
     sv.remove_prefix(junk_len + 1); // eat the # also
@@ -149,9 +157,10 @@ smfile_from_string_opt(string const& str)
       size_t sentinel_pos;
       
       {
-        sentinel_pos = sv.find(':'); if (sentinel_pos == string::npos) {
-          return (SmParseError) {.msg="While reading #NOTES/GameType: EOF"s};
-        }
+        while (isspace(sv[0])) sv.remove_prefix(1);
+        sentinel_pos = sv.find(':');
+        if (sentinel_pos == string::npos){return (SmParseError){.msg="While reading #NOTES/GameType: EOF"s};}
+
         string_view game_type = sv.substr(0, sentinel_pos);
         if (false) {}
         else if (game_type == "dance-single") { diff.game_type = GameType::DanceSingle; }
@@ -163,17 +172,20 @@ smfile_from_string_opt(string const& str)
       }
 
       {
+        while (isspace(sv[0])) sv.remove_prefix(1);
         sentinel_pos = sv.find(':'); if (sentinel_pos == string::npos) {
           return (SmParseError) {.msg="While reading #NOTES/Charter: EOF"s};
         }
+
         diff.charter = string(sv.data(), sentinel_pos);
         sv.remove_prefix(sentinel_pos + 1);
       }
 
       {
-        sentinel_pos = sv.find(':'); if (sentinel_pos == string::npos) {
-          return (SmParseError) {.msg="While reading #NOTES/DiffType: EOF"s};
-        }
+        while (isspace(sv[0])) sv.remove_prefix(1);
+        sentinel_pos = sv.find(':');
+        if (sentinel_pos == string::npos) {return (SmParseError){.msg="While reading #NOTES/DiffType: EOF"s};}
+
         string_view diff_type_s = sv.substr(0, sentinel_pos);
         if (false) {}
         else if (diff_type_s == "Beginner")  { diff.diff_type = DiffType::Beginner; }
@@ -190,9 +202,10 @@ smfile_from_string_opt(string const& str)
       }
 
       {
-        sentinel_pos = sv.find(':'); if (sentinel_pos == string::npos) {
-          return (SmParseError) {.msg="While reading #NOTES/DiffNum: EOF"s};
-        }
+        while (isspace(sv[0])) sv.remove_prefix(1);
+        sentinel_pos = sv.find(':');
+        if (sentinel_pos == string::npos) {return (SmParseError) {.msg="While reading #NOTES/DiffNum: EOF"s};}
+
         string_view diff_num_s = sv.substr(0, sentinel_pos);
         uint32_t num;
         auto err = std::from_chars(diff_num_s.data(), diff_num_s.data() + diff_num_s.size(), num);
@@ -204,9 +217,10 @@ smfile_from_string_opt(string const& str)
       }
 
       {
-        sentinel_pos = sv.find(':'); if (sentinel_pos == string::npos) {
-          return (SmParseError) {.msg="While reading #NOTES/GrooveValues: EOF"s};
-        }
+        while (isspace(sv[0])) sv.remove_prefix(1);
+        sentinel_pos = sv.find(':');
+        if (sentinel_pos == string::npos) {return (SmParseError){.msg="While reading #NOTES/GrooveValues: EOF"s};}
+
         string_view groove_values_s = sv.substr(0, sentinel_pos);
         std::vector<double> gvs;
         for (auto gvr : groove_values_s | std::views::split(':')) {
