@@ -1,45 +1,55 @@
-// #include <QString>
-// #include <QList>
-
-
 #include "sm_parser.h"
-
-#include <cassert>
-#include <cstdint>
-#include <string>
-#include <array>
-#include <vector>
-#include <variant>
-#include <format>
-#include <ranges>
-#include <print>
-#include <algorithm>
-#include <system_error>
-#include <chrono>
-
+#include "precompiled.h"
 
 using std::array;
 using std::string;
 using std::string_view;
 using std::vector;
-// using namespace std::chrono_literals;
 using namespace std::string_literals;
 
 #define eprintf(...) fprintf(stderr, __VA_ARGS__)
 
-std::string string_from_difftype(DiffType dt)
+bool smfile_key_is_string_type(string_view sv) {
+  // possibly more
+  auto str_keys = {
+    "TITLE", "SUBTITLE", "ARTIST",
+    "TITLETRANSLIT", "SUBTITLETRANSLIT", "ARTISTTRANSLIT",
+    "CREDIT", "MUSIC", "BACKGROUND", "BANNER", "CDTITLE",
+  };
+  return std::any_of(str_keys.begin(), str_keys.end(), [&](auto k){return k == sv;});
+}
+bool smfile_key_is_double_type(string_view sv) {
+  auto double_keys = { "OFFSET", "SAMPLESTART", "SAMPLELENGTH"};
+  return std::any_of(double_keys.begin(),
+                     double_keys.end(),
+                     [&](auto k){return k == sv;});
+}
+
+const char *cstr_from_difftype(DiffType dt)
 {
   switch (dt) {
-    case DiffType::Beginner: return "Beginner";
-    case DiffType::Easy: return "Easy";
-    case DiffType::Medium: return "Medium";
-    case DiffType::Hard: return "Hard";
+    case DiffType::Beginner:  return "Beginner";
+    case DiffType::Easy:      return "Easy";
+    case DiffType::Medium:    return "Medium";
+    case DiffType::Hard:      return "Hard";
     case DiffType::Challenge: return "Challenge";
-    case DiffType::Edit: return "Edit";
+    case DiffType::Edit:      return "Edit";
   }
   assert(false);
 }
-std::string string_from_gametype(GameType gt)
+QColor qcolor_from_difftype(DiffType dt)
+{
+  switch (dt) {
+    case DiffType::Beginner:  return QColorConstants::DarkCyan;
+    case DiffType::Easy:      return QColorConstants::DarkGreen;
+    case DiffType::Medium:    return QColorConstants::Svg::darkorange;
+    case DiffType::Hard:      return QColorConstants::DarkRed;
+    case DiffType::Challenge: return QColorConstants::Svg::purple;
+    case DiffType::Edit:      return QColorConstants::DarkGray;
+  }
+  assert(false);
+}
+const char *cstr_from_gametype(GameType gt)
 {
   switch (gt) {
     case GameType::DanceSingle: return "dance-single (4 keys)";
@@ -86,6 +96,11 @@ const std::string CHART = ""
 std::variant<SmFile, SmParseError>
 smfile_from_string_opt(string const& str)
 {
+  // -- HACK: make float conversions not break on non-English locales.
+  // -- for some reason, setting this right after main() doesn't work, and none of
+  // -- QLocale stuff works either.
+  setlocale(LC_ALL, "C");
+
   /*
   find hash. If not, we're done. Let's permit files that don't have a diff yet (maybe warn).
   find colon. If not, panic. If yes, translate the key to an enum and a datatype repr.
@@ -109,7 +124,8 @@ smfile_from_string_opt(string const& str)
 
       auto te = std::chrono::system_clock::now();
       auto us = std::chrono::duration_cast<std::chrono::microseconds>(te-tb).count();
-      std::print(stderr, "Parsed an SmFile in {} seconds", (double)us / 1000000.);
+      // std::print(stderr, "Parsed an SmFile in {} seconds", (double)us / 1000000.);
+      eprintf("Parsed an SmFile in %lf seconds", (double)us / 1000000.);
       return smfile;
     }
 
@@ -121,33 +137,73 @@ smfile_from_string_opt(string const& str)
     string_view key = sv.substr(0, colon_pos);
     sv.remove_prefix(colon_pos + 1);
 
+
+    size_t semi_pos = string::npos;
+    // because notes take 99 % of the file and we don't want to scan that
+    if (key != "NOTES") {
+      semi_pos = sv.find(';');
+      if (semi_pos == string::npos) {
+        return (SmParseError){.msg=std::format("While reading #{}: EOF", key)};
+      }
+    }
+
     if (false) {
-    } else if (key == "TITLE") {
-      size_t semi_pos = sv.find(';');
-      if (semi_pos == string::npos) { return (SmParseError){.msg="While reading #TITLE: EOF"s}; }
+    // you might say this is stupid and inefficient but I don't see a better way other than
+    // some macro magic, and even then you don't have a preprocessor macro to turn things
+    // upper/lower case
+    } else if (smfile_key_is_string_type(key)) {
+      std::string val(sv.data(), semi_pos);
+      if (false) {}
+      else if (key == "TITLE")      smfile.title = val;
+      else if (key == "SUBTITLE")   smfile.subtitle = val;
+      else if (key == "ARTIST")     smfile.artist = val;
+      else if (key == "BACKGROUND") smfile.background = val;
+      else if (key == "BANNER")     smfile.banner = val;
+      else if (key == "CDTITLE")    smfile.cdtitle = val;
+      else if (key == "CREDIT")     smfile.credit = val;
+      else if (key == "MUSIC")      smfile.music = val;
+      else {
+        eprintf("unhandled sm key of strhing type %s\n", string(key).c_str());
+        fflush(stderr); assert(false);
+      }
+    } else if (smfile_key_is_double_type(key)) {
+      double parsed;
+      std::string_view val = sv.substr(0, semi_pos);
+      int matched = sscanf(val.data(), "%lf", &parsed);
+      if (matched != 1) {
+        eprintf("While reading #NOTES/%s: Couldn't parse float, defaulting to 0.0\n", string(key).c_str());
+        parsed = 0;
+      }
+      // eprintf("parsed float %lf\n", parsed);
+      if (false) {}
+      else if (key == "OFFSET")       smfile.offset = parsed;
+      else if (key == "SAMPLESTART")  smfile.samplestart = parsed;
+      else if (key == "SAMPLELENGTH") smfile.samplelength = parsed;
+      else {
+        eprintf("unhandled sm key of double type %s\n", string(key).c_str());
+        fflush(stderr); assert(false);
+      }
+    } else if (key == "BPMS" || key == "STOPS") {
+      string_view timevals_sv = sv.substr(0, semi_pos);
 
-      size_t title_len = semi_pos;
-      smfile.title = std::string(sv.data(), title_len);
-
-    } else if (key == "BPMS") {
-      size_t semi_pos = sv.find(';');
-      if (semi_pos == string::npos) { return (SmParseError){.msg="While reading #BPMS: EOF"s}; }
-      // TODO: actually parse _key=val_,_key=val_,_key=val_; list (_ == possible space)
-      string_view bpms_sv = sv.substr(0, semi_pos);
-
-      std::vector<TimeKV> bpms;
-      for (auto kv_s : bpms_sv | std::views::split(',')) {
-        double time, bpm;
-        int matched = sscanf(kv_s.data(), " %lf=%lf", &time, &bpm);
+      std::vector<TimeKV> timevals;
+      for (auto kv_s : timevals_sv | std::views::split(',')) {
+        double time, val;
+        int matched = sscanf(kv_s.data(), " %lf=%lf", &time, &val);
         if (matched != 2) {
           // not super robust but let's move on for now
-          eprintf("While reading #NOTES/BPMS: Couldn't parse float\n");
+          eprintf("While reading #NOTES/%s: Couldn't parse float, ignoring\n", string(key).c_str());
         } else {
-          bpms.push_back(TimeKV(time, bpm));
+          timevals.push_back(TimeKV(time, val));
         }
       }
-      smfile.bpms = bpms;
-
+      if (false) {}
+      else if (key == "BPMS")  smfile.bpms = timevals;
+      else if (key == "STOPS") smfile.stops = timevals;
+      else {
+        eprintf("unhandled sm key of std::vector<TimeKV> type %s\n", string(key).c_str());
+        fflush(stderr); assert(false);
+      }
     } else if (key == "NOTES") {
       Difficulty diff;
       size_t sentinel_pos;
@@ -333,7 +389,8 @@ smfile_from_string_opt(string const& str)
               measure_i, pats_per_measure);
           }
 
-          for (auto [i, m] : std::views::enumerate(current_measure_pre)) {
+          size_t i = 0;
+          for (auto m : current_measure_pre) {
             if (!std::all_of(m.line.begin(), m.line.end(), [](auto x){return x == NoteType::None;})) {
               m.beat    = (uint8_t)((i * beats_per_measure * 48 / pats_per_measure) / 48);
               m.smticks = (uint8_t)((i * beats_per_measure * 48 / pats_per_measure) % 48);
@@ -341,6 +398,7 @@ smfile_from_string_opt(string const& str)
               m.sec = secs_per_beat * (m.beat + m.smticks / 48.);
               diff.note_rows.push_back(m);
             }
+            i++;
           }
           measure_i += 1;
         } // for all measures
