@@ -31,6 +31,19 @@ std::array<NoteType, 4> notes_from_string(const char str[4]) {
   ret[3] = static_cast<NoteType>(str[3]);
   return ret;
 }
+// 20 and 28 are still useful sometimes, but maybe that should be in some checkbox
+int sm_sane_snap_higher_than(int snap) {
+  for (auto bound : {1,2,4,8,12,16,24,32,36,48,64,96,192}) {
+    if (snap < bound) return bound;
+  }
+  return 192;
+}
+int sm_sane_snap_lower_than(int snap) {
+  for (auto bound : {192,96,64,48,36,32,24,16,12,8,4,2,1}) {
+    if (snap > bound) return bound;
+  }
+  return 1;
+}
 
 struct NoteRowRects {
   std::vector<QRectF> rects; // actually 1 .. 4 of them
@@ -124,10 +137,26 @@ public:
 
   protected:
   void wheelEvent(QWheelEvent *event) override {
+    auto modifiers = QGuiApplication::keyboardModifiers();
     if (event->angleDelta().ry() > 0) {
-      chart_pos.increment_by(-(int)smticks_in_1_(current_snap_nths));
+      if (modifiers & Qt::ControlModifier) {
+        // change snap
+        int new_snap = (modifiers & Qt::ShiftModifier)
+                     ? current_snap_nths+1
+                     : sm_sane_snap_higher_than(current_snap_nths);
+        current_snap_nths = std::min(new_snap, 192);
+      } else {
+        chart_pos.increment_by(-(int)smticks_in_1_(current_snap_nths));
+      }
     } else {
-      chart_pos.increment_by(+(int)smticks_in_1_(current_snap_nths));
+      if (modifiers & Qt::ControlModifier) {
+        int new_snap = (modifiers & Qt::ShiftModifier)
+                     ? current_snap_nths-1
+                     : sm_sane_snap_lower_than(current_snap_nths);
+        current_snap_nths = std::max(new_snap, 1);
+      } else {
+        chart_pos.increment_by(+(int)smticks_in_1_(current_snap_nths));
+      }
     }
     // printf("raw smticks: %d\n", chart_pos.raw_smticks());
     px_chart_start_off = PX_CHART_START_CONST_OFF - px_per_smtick() * chart_pos.raw_smticks();
@@ -280,7 +309,8 @@ int main(int argc, char **argv) {
   tree.setHeaderHidden(true);
 
   QTreeWidgetItem t_root(&tree); {
-    t_root.setText(0, QString("SmFile [%1]").arg(path));
+    t_root.setText(0, "SmFile");
+    t_root.setText(1, path);
   }
   QTreeWidgetItem t_meta(&t_root); {
     t_meta.setText(0, "Metadata");
@@ -460,7 +490,9 @@ int main(int argc, char **argv) {
       // QLabel snap_text;
       // preview_controls.addWidget(&snap_text, 1);
 
-      QSlider cmod_slider(Qt::Vertical, nullptr); // doesn't look super aesthetic, but it's ok for now
+      // doesn't look super aesthetic, but it's ok for now
+      // TODO: replace with QSpinBox
+      QSlider cmod_slider(Qt::Vertical, nullptr);
         cmod_slider.setMinimum(300);
         cmod_slider.setMaximum(1000);
         cmod_slider.setValue(700);

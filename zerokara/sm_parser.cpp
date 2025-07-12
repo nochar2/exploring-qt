@@ -303,13 +303,6 @@ smfile_from_string_opt(string const& str)
         double bpm = smfile.bpms[0].value;
         double secs_per_beat = 60. / bpm ;
 
-        // TODO: parse the #OFFSET: field and add it everywhere here. Let's say the #NOTES will already be
-        // the complete thing, outside of user-specified offset of course.
-
-        // eat_spaces()
-        // eat_while_n("01234MLF", 4)
-
-
 
         uint32_t measure_i = 0;
 
@@ -357,7 +350,7 @@ smfile_from_string_opt(string const& str)
               }};
               // I don't know beat / ticks / seconds because I don't know the pattern count per measure yet
               // std::println(stderr, "pushing back a line {}", line_s);
-              current_measure_pre.push_back((NoteRow){ .measure=measure_i, .beat=0, .smticks=0, .sec=0, .line=line });
+              current_measure_pre.push_back((NoteRow){ .measure=measure_i, .beat=0, .smticks=0, .sec_zero_offset=0, .line=line });
               break;
             }
             default:
@@ -394,8 +387,7 @@ smfile_from_string_opt(string const& str)
             if (!std::all_of(m.line.begin(), m.line.end(), [](auto x){return x == NoteType::None;})) {
               m.beat    = (uint8_t)((i * beats_per_measure * 48 / pats_per_measure) / 48);
               m.smticks = (uint8_t)((i * beats_per_measure * 48 / pats_per_measure) % 48);
-              // improvable if slow
-              m.sec = secs_per_beat * (m.beat + m.smticks / 48.);
+              m.sec_zero_offset = secs_per_beat * (m.beat + m.smticks / 48.);
               diff.note_rows.push_back(m);
             }
             i++;
