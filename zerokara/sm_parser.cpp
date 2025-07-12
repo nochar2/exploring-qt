@@ -101,7 +101,7 @@ smfile_from_string_opt(string const& str)
   // const char *last_semi_pos = str.c_str();
   // size_t value_len;
 
-  std::string_view sv(str);
+  string_view sv(str);
 
   while (true) {
     size_t hash_pos = sv.find('#');
@@ -118,24 +118,22 @@ smfile_from_string_opt(string const& str)
 
     size_t colon_pos = sv.find(':');
     if (colon_pos == string::npos) { return (SmParseError){.msg="While reading a new key: EOF"s}; }
+    string_view key = sv.substr(0, colon_pos);
+    sv.remove_prefix(colon_pos + 1);
 
     if (false) {
-    } else if (sv.starts_with("TITLE:")) {
-      sv.remove_prefix(colon_pos + 1);
+    } else if (key == "TITLE") {
       size_t semi_pos = sv.find(';');
       if (semi_pos == string::npos) { return (SmParseError){.msg="While reading #TITLE: EOF"s}; }
 
       size_t title_len = semi_pos;
       smfile.title = std::string(sv.data(), title_len);
 
-    } else if (sv.starts_with("BPMS:")) {
-      sv.remove_prefix(colon_pos + 1);
+    } else if (key == "BPMS") {
       size_t semi_pos = sv.find(';');
-      eprintf("semi pos: %ld\n", semi_pos);
       if (semi_pos == string::npos) { return (SmParseError){.msg="While reading #BPMS: EOF"s}; }
       // TODO: actually parse _key=val_,_key=val_,_key=val_; list (_ == possible space)
       string_view bpms_sv = sv.substr(0, semi_pos);
-      std::println(stderr, "bpms sv is: {}", bpms_sv);
 
       std::vector<TimeKV> bpms;
       for (auto kv_s : bpms_sv | std::views::split(',')) {
@@ -150,9 +148,7 @@ smfile_from_string_opt(string const& str)
       }
       smfile.bpms = bpms;
 
-    } else if (sv.starts_with("NOTES:")) {
-      sv.remove_prefix(colon_pos + 1);
-
+    } else if (key == "NOTES") {
       Difficulty diff;
       size_t sentinel_pos;
       
@@ -352,7 +348,7 @@ smfile_from_string_opt(string const& str)
         eprintf("I: Parsed a diff with %lu noterows\n", diff.note_rows.size());
         smfile.diffs.push_back(diff);
       } // (NoteInfo parsing scope)
-    } // else if (sv.starts_with("#NOTES")) {
+    } // else if (key == "#NOTES") {
   } // while (true)
 }
 
