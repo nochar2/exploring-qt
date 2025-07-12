@@ -44,33 +44,95 @@ struct NoteRowRects {
 // };
 
 // who cares, everyone uses 4/4
-double ticks_per_1_(int subdiv){return 192./subdiv;};
+double smticks_in_1_(int subdiv){return 192./subdiv;};
 
+
+struct SmRelativePos {
+  int measures = 0;
+  int beats = 0;
+  int smticks = 0;
+
+  // we assume 4/4
+  void increment_by(int how_many_smticks) {
+    this->smticks += how_many_smticks;
+    if (smticks < 0) {
+      // stupid, idk how negative numbers work
+      int n_borrows = ((-smticks + 47) / 48);
+      beats -= n_borrows;
+      smticks += 48 * n_borrows;
+      assert(smticks >= 0);
+    }
+    else if (smticks >= 48) {
+      beats += smticks / 48;
+      smticks = smticks % 48;
+    }
+
+    if (beats >= 4) {
+      measures += beats / 4;
+      beats = beats % 4;
+    } else if (beats < 0) {
+      int n_borrows = ((-beats + 3) / 4);
+      measures -= n_borrows;
+      beats += 4 * n_borrows;
+    }
+  }
+  // WRONG, but let's allow this for now
+  int raw_smticks() {
+    return this->measures * 192 + this->beats * 48 + this->smticks;
+  }
+};
 
 class NoteDisplayWidget : public QWidget {
+Q_OBJECT
+
   // upscroll is natural to think about in normal coordinates
   // (screen y grows downwards)
 
+public:
   bool downscroll = false;
   int cmod = 400;
-  int px_chart_start_off = 30;
+  const double PX_CHART_START_CONST_OFF = 30.0;
+  double px_chart_start_off = PX_CHART_START_CONST_OFF;
+
+  // instead of incrementing / decrementing pixel offset directly, let's keep track of the
+  // precise relative position and then recalculate the pixels on scroll
+  SmRelativePos chart_pos = {0};
+  
+  // let's say this means 16ths, yeah whatever it's wrong but let's do the simplest thing for now
+  int current_snap_nths = 16;
+
+
+  // -- TODO: yes I know I rely on a single bpm for now
+  double px_per_smtick() {
+    double bpm = smfile.bpms[0].value;
+    double secs_per_beat = 60./bpm;
+    double secs_per_smtick = secs_per_beat / 48.;
+    return secs_per_smtick * cmod;
+  }
+  double px_per_current_snap() {
+    return 192.0 / current_snap_nths * px_per_smtick();
+  }
+
 
   public:
-  void onDownscrollClick(Qt::CheckState ds_state) { this->downscroll = ds_state == Qt::Checked; this->update(); }
+  void onDownscrollCheckboxClick(Qt::CheckState ds_state) { this->downscroll = ds_state == Qt::Checked; this->update(); }
   void onCmodChange(int value) { this->cmod = value; this->update(); }
+  
+  signals:
+  void positionChanged(SmRelativePos new_pos, int snap);
   
 
   protected:
   void wheelEvent(QWheelEvent *event) override {
-    // -- TODO: move by snap, not by 30 pixels.
     if (event->angleDelta().ry() > 0) {
-      // printf("scrollev, delta > 0\n");
-      px_chart_start_off += 30;
+      chart_pos.increment_by(-(int)smticks_in_1_(current_snap_nths));
     } else {
-      // printf("scrollev, delta < 0\n");
-      px_chart_start_off -= 30;
+      chart_pos.increment_by(+(int)smticks_in_1_(current_snap_nths));
     }
+    // printf("raw smticks: %d\n", chart_pos.raw_smticks());
+    px_chart_start_off = PX_CHART_START_CONST_OFF - px_per_smtick() * chart_pos.raw_smticks();
     this->update();
+    emit positionChanged(chart_pos, current_snap_nths);
   };
 
   void paintEvent(QPaintEvent *event) override {
@@ -85,12 +147,6 @@ class NoteDisplayWidget : public QWidget {
     int32_t px_judge_line_off = 30;
     int32_t left_start = this->width() / 2 - (int32_t)(2 * note_width); // for centering
 
-    // -- TODO: again we assume one BPM only for now
-    // -- TODO: also this is obsolete and should be seconds-based
-    double bpm = smfile.bpms[0].value;
-    double secs_per_beat = 60./bpm;
-    double secs_per_smtick = secs_per_beat / 48.; // smallest subdivision in stepmania games
-    double px_per_smtick = secs_per_smtick * cmod;
 
 
   
@@ -113,7 +169,7 @@ class NoteDisplayWidget : public QWidget {
 
     // draw snap lines (for now, do 4ths)
     for (int i = 0; i < 10; i++) {
-      int y = (int)(px_chart_start_off + i * (px_per_smtick * ticks_per_1_(4)));
+      int y = (int)(px_chart_start_off + i * (px_per_smtick() * smticks_in_1_(4)));
       if (downscroll) y = this->height() - y;
       auto snap_line = QLineF(left_start, y, left_start + 4 * note_width, y);
       pen.setWidth(1); pen.setColor(Qt::red); painter.setPen(pen);
@@ -136,7 +192,7 @@ class NoteDisplayWidget : public QWidget {
         if (row.line[i] == NoteType::Tap) {
           line.rects.push_back(
             QRect((int32_t)(left_start + note_width * (int32_t)i),
-                  (int32_t)(px_chart_start_off + px_per_smtick * global_smticks),
+                  (int32_t)(px_chart_start_off + px_per_smtick() * global_smticks),
                   note_width, note_height)
           );
         }
@@ -202,7 +258,8 @@ int main(int argc, char **argv) {
 
   // parse the smfile
   
-  std::ifstream file("ext/Shannon's Theorem.sm");
+  const char *path = "ext/Shannon's Theorem.sm";
+  std::ifstream file(path);
   std::ostringstream ss;
   ss << file.rdbuf();
   auto smfile_opt = smfile_from_string_opt(ss.str());
@@ -223,7 +280,7 @@ int main(int argc, char **argv) {
   tree.setHeaderHidden(true);
 
   QTreeWidgetItem t_root(&tree); {
-    t_root.setText(0, "SmFile");
+    t_root.setText(0, QString("SmFile [%1]").arg(path));
   }
   QTreeWidgetItem t_meta(&t_root); {
     t_meta.setText(0, "Metadata");
@@ -302,7 +359,7 @@ int main(int argc, char **argv) {
     t_diffval->setText(1, QString::number(diff.diff_num));
 
     auto *t_notes = new QTreeWidgetItem(t_diff);
-    t_notes->setText(0, "Note rows");
+    t_notes->setText(0, QString("Note rows (%1)").arg(diff.note_rows.size()));
 
     for (auto note : diff.note_rows) {
       auto *t_note = new QTreeWidgetItem(t_notes);
@@ -332,15 +389,15 @@ int main(int argc, char **argv) {
   QHBoxLayout layout(&w_root);
   
   layout.addWidget(&tree, 5);
-  // -- QLabel label; label.setText("Hi world"); label.setAlignment(Qt::AlignCenter);
-  // -- layout.addWidget(&label, 3);
-  QTextEdit viewer;
-  viewer.setReadOnly(true);
-  viewer.setText("A bunch of random text\nthat spans\na couple lines");
+
+  // QTextEdit viewer;
+  // viewer.setReadOnly(true);
+  // viewer.setText("A bunch of random text\nthat spans\na couple lines");
   // layout.addWidget(&viewer, 2);
 
 
-  // You can't scope these, they need to live. Also, if you make them static, it aborts on exit
+  // You can't scope these, they need to live somehow (on stack or heap).
+  // Also, if you make them static, it aborts on exit for some reason
   // leaving just the indentation for now
   QVBoxLayout preview_tile;
     NoteDisplayWidget preview_actual;
@@ -350,7 +407,30 @@ int main(int argc, char **argv) {
       preview_actual.setPalette(pal);
     preview_tile.addWidget(&preview_actual, 8);
 
-    QLabel status_bar("Beat x, Sm-tick x  |  Snap x");
+    // TODO: this guy needs to be updated when I scroll
+    // QLabel status_bar(QString("Measure %1, beat %2, smtick %3  |  Snap %4")
+    //                   .arg(preview_actual.chart_pos.measures)
+    //                   .arg(preview_actual.chart_pos.beats)
+    //                   .arg(preview_actual.chart_pos.smticks)
+    //                   .arg(preview_actual.current_snap_nths)
+    //                 );
+    QLabel status_bar;
+
+    auto on_pos_change =
+      [&](SmRelativePos pos, int snap){status_bar.setText(
+        QString("Measure %1, beat %2, smtick %3  |  Snap %4")
+          .arg(pos.measures)
+          .arg(pos.beats)
+          .arg(pos.smticks)
+          .arg(snap)
+      );};
+    on_pos_change(preview_actual.chart_pos, preview_actual.current_snap_nths);
+
+    QObject::connect(
+      &preview_actual,
+      &NoteDisplayWidget::positionChanged,
+      on_pos_change
+    );
     preview_tile.addWidget(&status_bar, 0);
     preview_tile.setAlignment(&status_bar, Qt::AlignCenter);
     
@@ -362,9 +442,9 @@ int main(int argc, char **argv) {
           &downscroll_chk,
           &QCheckBox::checkStateChanged,
           &preview_actual,
-          &NoteDisplayWidget::onDownscrollClick
+          &NoteDisplayWidget::onDownscrollCheckboxClick
         );
-        preview_actual.onDownscrollClick(downscroll_chk.checkState());  // set initial
+        preview_actual.onDownscrollCheckboxClick(downscroll_chk.checkState());  // set initial
       preview_controls.addWidget(&downscroll_chk, 6);
       preview_controls.setAlignment(&downscroll_chk, Qt::AlignCenter);
 
@@ -414,3 +494,5 @@ int main(int argc, char **argv) {
 
   return app.exec();
 }
+
+#include "zerokara.moc"
