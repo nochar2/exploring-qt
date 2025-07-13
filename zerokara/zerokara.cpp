@@ -83,9 +83,11 @@ struct SmRelativePos {
     pos.smticks += how_many_smticks;
     if (pos.smticks < 0) {
       // stupid, idk how negative numbers work
-      int n_borrows = (int)((-pos.smticks + 47.) / 48.);
+      int n_borrows = (int)((-pos.smticks + 47.999999) / 48.);
       pos.beats -= n_borrows;
       pos.smticks += 48 * n_borrows;
+      printf("smticks: %lf\n", pos.smticks);
+      if (-0.000001 < pos.smticks && pos.smticks < 0) { pos.smticks = 0; }
       assert(pos.smticks >= 0);
     }
     else if (pos.smticks >= 48) {
@@ -167,7 +169,7 @@ public:
                      : sm_sane_snap_lower_than(current_snap_nths);
         current_snap_nths = std::max(new_snap, 1);
       } else {
-        auto new_pos = SmRelativePos::incremented_by(cur_chart_pos, -(int)smticks_in_1_(current_snap_nths));
+        auto new_pos = SmRelativePos::incremented_by(cur_chart_pos, -smticks_in_1_(current_snap_nths));
         cur_chart_pos = (new_pos.measures < 0) ? (SmRelativePos){0} : new_pos;
       }
     } else {
@@ -177,7 +179,7 @@ public:
                      : sm_sane_snap_higher_than(current_snap_nths);
         current_snap_nths = std::min(new_snap, 192);
       } else {
-        auto new_pos = SmRelativePos::incremented_by(cur_chart_pos, +(int)smticks_in_1_(current_snap_nths));
+        auto new_pos = SmRelativePos::incremented_by(cur_chart_pos, +smticks_in_1_(current_snap_nths));
         cur_chart_pos = (new_pos.measures < 0) ? (SmRelativePos){0} : new_pos;
       }
     }
@@ -497,7 +499,7 @@ int main(int argc, char **argv) {
                 "Snap <span style='color: %4; font-weight: 600;'>%5</span>")
           .arg(pos.measures)
           .arg(pos.beats)
-          .arg(pos.smticks)
+          .arg(QString::number(pos.smticks, 'g', 4))
           .arg(cstr_color_from_snap(snap))
           .arg(snap)
       );};
