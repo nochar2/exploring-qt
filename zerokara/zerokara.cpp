@@ -74,23 +74,23 @@ double smticks_in_1_(int subdiv){return 192./subdiv;};
 
 
 struct SmRelativePos {
-  int measures = 0;
-  int beats = 0;
-  int smticks = 0;
+  int32_t measures = 0;
+  int32_t beats = 0;
+  double smticks = 0;
 
   // we assume 4/4
-  void increment_by(int how_many_smticks) {
+  void increment_by(double how_many_smticks) {
     this->smticks += how_many_smticks;
     if (smticks < 0) {
       // stupid, idk how negative numbers work
-      int n_borrows = ((-smticks + 47) / 48);
+      int n_borrows = (int)((-smticks + 47.) / 48.);
       beats -= n_borrows;
       smticks += 48 * n_borrows;
       assert(smticks >= 0);
     }
     else if (smticks >= 48) {
-      beats += smticks / 48;
-      smticks = smticks % 48;
+      beats += (int)(smticks / 48.);
+      smticks = (int)smticks % 48;
     }
 
     if (beats >= 4) {
@@ -103,7 +103,7 @@ struct SmRelativePos {
     }
   }
   // WRONG, but let's allow this for now
-  int raw_smticks() {
+  double total_smticks() {
     return this->measures * 192 + this->beats * 48 + this->smticks;
   }
 };
@@ -117,12 +117,12 @@ Q_OBJECT
 public:
   bool downscroll = false;
   int cmod = 400;
-  const double PX_CHART_START_CONST_OFF = 30.0;
-  double px_chart_start_off = PX_CHART_START_CONST_OFF;
+  const double PX_VISUAL_OFFSET_FROM_HORIZ_LINE = 30.0;
+  double px_of_measure_zero = PX_VISUAL_OFFSET_FROM_HORIZ_LINE;
 
   // instead of incrementing / decrementing pixel offset directly, let's keep track of the
   // precise relative position and then recalculate the pixels on scroll
-  SmRelativePos chart_pos = {0};
+  SmRelativePos cur_chart_pos = {0};
   
   // let's say this means 16ths, yeah whatever it's wrong but let's do the simplest thing for now
   int current_snap_nths = 16;
@@ -142,7 +142,11 @@ public:
 
   public:
   void onDownscrollCheckboxClick(Qt::CheckState ds_state) { this->downscroll = ds_state == Qt::Checked; this->update(); }
-  void onCmodChange(int value) { this->cmod = value; this->update(); }
+  void onCmodChange(int value) {
+    this->cmod = value;
+    px_of_measure_zero = PX_VISUAL_OFFSET_FROM_HORIZ_LINE - px_per_smtick() * cur_chart_pos.total_smticks();
+    this->update();
+  }
   
   signals:
   void positionChanged(SmRelativePos new_pos, int snap);
@@ -162,7 +166,7 @@ public:
                      : sm_sane_snap_lower_than(current_snap_nths);
         current_snap_nths = std::max(new_snap, 1);
       } else {
-        chart_pos.increment_by(-(int)smticks_in_1_(current_snap_nths));
+        cur_chart_pos.increment_by(-(int)smticks_in_1_(current_snap_nths));
       }
     } else {
       if (modifiers & Qt::ControlModifier) {
@@ -171,13 +175,13 @@ public:
                      : sm_sane_snap_higher_than(current_snap_nths);
         current_snap_nths = std::min(new_snap, 192);
       } else {
-        chart_pos.increment_by(+(int)smticks_in_1_(current_snap_nths));
+        cur_chart_pos.increment_by(+(int)smticks_in_1_(current_snap_nths));
       }
     }
     // printf("raw smticks: %d\n", chart_pos.raw_smticks());
-    px_chart_start_off = PX_CHART_START_CONST_OFF - px_per_smtick() * chart_pos.raw_smticks();
+    px_of_measure_zero = PX_VISUAL_OFFSET_FROM_HORIZ_LINE - px_per_smtick() * cur_chart_pos.total_smticks();
     this->update();
-    emit positionChanged(chart_pos, current_snap_nths);
+    emit positionChanged(cur_chart_pos, current_snap_nths);
   };
 
   void paintEvent(QPaintEvent *event) override {
@@ -212,13 +216,34 @@ public:
     painter.drawLine(left_edge);
     painter.drawLine(right_edge);
 
-    // draw snap lines (for now, do 4ths)
-    for (int i = 0; i < 10; i++) {
-      int y = (int)(px_chart_start_off + i * (px_per_smtick() * smticks_in_1_(4)));
-      if (downscroll) y = this->height() - y;
+    // draw snap lines
+    // SmRelativePos snap_of_earliest_snapline = {
+    //   .measures = cur_chart_pos.measures == 0 ? 0 : cur_chart_pos.measures-1,
+    //   .beats = 0,
+    //   .smticks = 0
+    // };
+    // SmRelativePos snap_of_this_snapline = snap_of_earliest_snapline;
+    SmRelativePos snap_of_this_snapline = cur_chart_pos;
+
+    // printf("---------------\n");
+    for (int i = 0; i < 300; i++) {
+      int y_dist = (int)(px_of_measure_zero + snap_of_this_snapline.total_smticks() * px_per_smtick());
+      if (y_dist < 0) {
+        // printf("NOT drawing line at ydist=%d, smticks == %d, px_chart_start_off %d\n", y_dist, (int32_t)snap_of_this_snapline.smticks, (int)px_of_measure_zero);
+        snap_of_this_snapline.increment_by(192.0/current_snap_nths);
+        continue;
+      }
+      if (y_dist > 1000) { break; /* boo, use proper height */}
+      int y = downscroll ? this->height() - y_dist : y_dist;
+
+      QColor color = qcolor_from_smticks((uint32_t)snap_of_this_snapline.smticks);
+      pen.setColor(color);
+      pen.setWidth(color == Qt::red ? 3 : color == Qt::blue ? 2 : 1);
+      painter.setPen(pen);
       auto snap_line = QLineF(left_start, y, left_start + 4 * note_width, y);
-      pen.setWidth(1); pen.setColor(Qt::red); painter.setPen(pen);
       painter.drawLine(snap_line);
+
+      snap_of_this_snapline.increment_by(192./current_snap_nths);
     }
 
 
@@ -237,7 +262,7 @@ public:
         if (row.line[i] == NoteType::Tap) {
           line.rects.push_back(
             QRect((int32_t)(left_start + note_width * (int32_t)i),
-                  (int32_t)(px_chart_start_off + px_per_smtick() * global_smticks),
+                  (int32_t)(px_of_measure_zero + px_per_smtick() * global_smticks),
                   note_width, note_height)
           );
         }
@@ -472,7 +497,7 @@ int main(int argc, char **argv) {
           .arg(cstr_color_from_snap(snap))
           .arg(snap)
       );};
-    on_pos_change(preview_actual.chart_pos, preview_actual.current_snap_nths);
+    on_pos_change(preview_actual.cur_chart_pos, preview_actual.current_snap_nths);
 
     QObject::connect(
       &preview_actual,
