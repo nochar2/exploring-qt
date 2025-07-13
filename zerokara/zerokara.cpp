@@ -22,6 +22,19 @@ QColor qcolor_from_smticks(uint32_t smticks) {
   }
   return QColorConstants::Gray;
 }
+const char *cstr_color_from_snap (int snap) {
+  switch (snap) {
+    case 1: case 2: case 4: return "red";
+    case 8: return "royalblue";
+    case 3: case 6: case 12: return "green"; // limegreen
+    case 16: return "goldenrod";
+    case 24: return "magenta";
+    case 32: return "orange";
+    case 48: return "deepskyblue";
+    case 20: case 28: case 36: case 64: return "grey";
+    default: return "";
+  }
+}
 
 std::array<NoteType, 4> notes_from_string(const char str[4]) {
   std::array<NoteType, 4> ret = {};
@@ -136,24 +149,27 @@ public:
   
 
   protected:
+  /// On mouse wheel scroll:
+  /// no modifiers -> scroll,
+  /// ctrl -> change snap,
+  /// ctrl+shift -> change snap (fine)
   void wheelEvent(QWheelEvent *event) override {
     auto modifiers = QGuiApplication::keyboardModifiers();
-    if (event->angleDelta().ry() > 0) {
+    if ((event->angleDelta().ry() < 0) ^ !downscroll) {
       if (modifiers & Qt::ControlModifier) {
-        // change snap
         int new_snap = (modifiers & Qt::ShiftModifier)
-                     ? current_snap_nths+1
-                     : sm_sane_snap_higher_than(current_snap_nths);
-        current_snap_nths = std::min(new_snap, 192);
+                     ? current_snap_nths-1
+                     : sm_sane_snap_lower_than(current_snap_nths);
+        current_snap_nths = std::max(new_snap, 1);
       } else {
         chart_pos.increment_by(-(int)smticks_in_1_(current_snap_nths));
       }
     } else {
       if (modifiers & Qt::ControlModifier) {
         int new_snap = (modifiers & Qt::ShiftModifier)
-                     ? current_snap_nths-1
-                     : sm_sane_snap_lower_than(current_snap_nths);
-        current_snap_nths = std::max(new_snap, 1);
+                     ? current_snap_nths+1
+                     : sm_sane_snap_higher_than(current_snap_nths);
+        current_snap_nths = std::min(new_snap, 192);
       } else {
         chart_pos.increment_by(+(int)smticks_in_1_(current_snap_nths));
       }
@@ -448,10 +464,12 @@ int main(int argc, char **argv) {
 
     auto on_pos_change =
       [&](SmRelativePos pos, int snap){status_bar.setText(
-        QString("Measure %1, beat %2, smtick %3  |  Snap %4")
+        QString("Measure %1, beat %2, smtick %3  |  "
+                "Snap <span style='color: %4; font-weight: 600;'>%5</span>")
           .arg(pos.measures)
           .arg(pos.beats)
           .arg(pos.smticks)
+          .arg(cstr_color_from_snap(snap))
           .arg(snap)
       );};
     on_pos_change(preview_actual.chart_pos, preview_actual.current_snap_nths);
