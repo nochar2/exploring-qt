@@ -79,28 +79,29 @@ struct SmRelativePos {
   double smticks = 0;
 
   // we assume 4/4
-  void increment_by(double how_many_smticks) {
-    this->smticks += how_many_smticks;
-    if (smticks < 0) {
+  static SmRelativePos incremented_by(SmRelativePos pos, double how_many_smticks) {
+    pos.smticks += how_many_smticks;
+    if (pos.smticks < 0) {
       // stupid, idk how negative numbers work
-      int n_borrows = (int)((-smticks + 47.) / 48.);
-      beats -= n_borrows;
-      smticks += 48 * n_borrows;
-      assert(smticks >= 0);
+      int n_borrows = (int)((-pos.smticks + 47.) / 48.);
+      pos.beats -= n_borrows;
+      pos.smticks += 48 * n_borrows;
+      assert(pos.smticks >= 0);
     }
-    else if (smticks >= 48) {
-      beats += (int)(smticks / 48.);
-      smticks = (int)smticks % 48;
+    else if (pos.smticks >= 48) {
+      pos.beats += (int)(pos.smticks / 48.);
+      pos.smticks = (int)pos.smticks % 48;
     }
 
-    if (beats >= 4) {
-      measures += beats / 4;
-      beats = beats % 4;
-    } else if (beats < 0) {
-      int n_borrows = ((-beats + 3) / 4);
-      measures -= n_borrows;
-      beats += 4 * n_borrows;
+    if (pos.beats >= 4) {
+      pos.measures += pos.beats / 4;
+      pos.beats = pos.beats % 4;
+    } else if (pos.beats < 0) {
+      int n_borrows = ((-pos.beats + 3) / 4);
+      pos.measures -= n_borrows;
+      pos.beats += 4 * n_borrows;
     }
+    return pos;
   }
   // WRONG, but let's allow this for now
   double total_smticks() {
@@ -166,7 +167,8 @@ public:
                      : sm_sane_snap_lower_than(current_snap_nths);
         current_snap_nths = std::max(new_snap, 1);
       } else {
-        cur_chart_pos.increment_by(-(int)smticks_in_1_(current_snap_nths));
+        auto new_pos = SmRelativePos::incremented_by(cur_chart_pos, -(int)smticks_in_1_(current_snap_nths));
+        cur_chart_pos = (new_pos.measures < 0) ? (SmRelativePos){0} : new_pos;
       }
     } else {
       if (modifiers & Qt::ControlModifier) {
@@ -175,7 +177,8 @@ public:
                      : sm_sane_snap_higher_than(current_snap_nths);
         current_snap_nths = std::min(new_snap, 192);
       } else {
-        cur_chart_pos.increment_by(+(int)smticks_in_1_(current_snap_nths));
+        auto new_pos = SmRelativePos::incremented_by(cur_chart_pos, +(int)smticks_in_1_(current_snap_nths));
+        cur_chart_pos = (new_pos.measures < 0) ? (SmRelativePos){0} : new_pos;
       }
     }
     // printf("raw smticks: %d\n", chart_pos.raw_smticks());
@@ -224,13 +227,14 @@ public:
     // };
     // SmRelativePos snap_of_this_snapline = snap_of_earliest_snapline;
     SmRelativePos snap_of_this_snapline = cur_chart_pos;
+    snap_of_this_snapline.measures -= 1;
 
     // printf("---------------\n");
     for (int i = 0; i < 300; i++) {
       int y_dist = (int)(px_of_measure_zero + snap_of_this_snapline.total_smticks() * px_per_smtick());
       if (y_dist < 0) {
         // printf("NOT drawing line at ydist=%d, smticks == %d, px_chart_start_off %d\n", y_dist, (int32_t)snap_of_this_snapline.smticks, (int)px_of_measure_zero);
-        snap_of_this_snapline.increment_by(192.0/current_snap_nths);
+        snap_of_this_snapline = SmRelativePos::incremented_by(snap_of_this_snapline, 192.0/current_snap_nths);
         continue;
       }
       if (y_dist > 1000) { break; /* boo, use proper height */}
@@ -243,7 +247,7 @@ public:
       auto snap_line = QLineF(left_start, y, left_start + 4 * note_width, y);
       painter.drawLine(snap_line);
 
-      snap_of_this_snapline.increment_by(192./current_snap_nths);
+      snap_of_this_snapline = SmRelativePos::incremented_by(snap_of_this_snapline, 192.0/current_snap_nths);
     }
 
 
