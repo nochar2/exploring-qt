@@ -1,0 +1,4 @@
+If you use QSplitter instead of QHBoxLayout, it wants to delete children.
+If you delete an object, it wants to delete its children recursively.
+
+∴ All descendants of QSplitter need to be new-ed, otherwise your program will crash on exit.

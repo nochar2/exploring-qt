@@ -42,19 +42,43 @@ int main(int argc, char **argv) {
   QApplication app(argc, argv);
 
   QWidget root;
-  QHBoxLayout cont(&root);
+  QHBoxLayout row(&root);
 
-  QSpinBox spinbox;
-  spinbox.setMinimum(0);
-  spinbox.setMaximum(500);
-  spinbox.setSingleStep(10);
-  cont.addWidget(&spinbox);
+  QVBoxLayout w_controls;
+    QHBoxLayout w_grad_len;
+      QLabel lb_grad_len;
+      lb_grad_len.setText("Gradient length");
+      w_grad_len.addWidget(&lb_grad_len);
+
+      QSpinBox sb_grad_len;
+      sb_grad_len.setMinimum(0);
+      sb_grad_len.setMaximum(500);
+      sb_grad_len.setSingleStep(10);
+      w_grad_len.addWidget(&sb_grad_len);
+    w_controls.addLayout(&w_grad_len);
+
+    QHBoxLayout w_rect_speed;
+      QLabel lb_rect_speed;
+      lb_grad_len.setText("Rectangle speed");
+      w_grad_len.addWidget(&lb_grad_len);
+
+      QSpinBox sb_rect_speed;
+      sb_grad_len.setMinimum(0);
+      sb_grad_len.setMaximum(500);
+      sb_grad_len.setSingleStep(10);
+      w_grad_len.addWidget(&sb_grad_len);
+    w_controls.addLayout(&w_grad_len);
+  row.addLayout(&w_controls);
+
+
+
+
 
   QLabel w_text;
   w_text.setText("asdfjlkasdkljfasdjk");
   w_text.setTextInteractionFlags(Qt::TextInteractionFlag::TextSelectableByMouse);
   w_text.setAlignment(Qt::AlignCenter);
-  cont.addWidget(&w_text);
+  row.addWidget(&w_text);
 
   MyPaintWidget drawarea;
   {
@@ -62,10 +86,10 @@ int main(int argc, char **argv) {
     pal.setColor(QPalette::Window, Qt::black);
     drawarea.setPalette(pal);
   }
-  cont.addWidget(&drawarea);
+  row.addWidget(&drawarea);
 
   QWidget::connect(
-              &spinbox,
+              &sb_grad_len,
               &QSpinBox::valueChanged,
               &drawarea,
               [&](int value){

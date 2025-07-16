@@ -2,8 +2,17 @@
 
 // C++
 #include "precompiled.h"
+#include <QSplitter>
 
 SmFile smfile;
+
+// doesn't work! It still calls the parent destructor no matter what I do
+// class QSplitterExceptItDoesntFreeChildren : public QSplitter {
+// public:
+//   explicit QSplitterExceptItDoesntFreeChildren(QWidget* parent = nullptr) : QSplitter(parent) {};
+//   explicit QSplitterExceptItDoesntFreeChildren(Qt::Orientation orientation, QWidget* parent = nullptr) : QSplitter(orientation, parent) {};
+//   ~QSplitterExceptItDoesntFreeChildren() {};
+// };
 
 QColor qcolor_from_smticks(uint32_t smticks) {
   assert(smticks < 48);
@@ -350,70 +359,72 @@ int main(int argc, char **argv) {
 
 
   QWidget w_root;
+    // -- required so that it fills the entire space
+  QHBoxLayout layout_(&w_root);
 
-  QTreeWidget tree;
-  tree.setColumnCount(2);
-  tree.setHeaderHidden(true);
+  QSplitter resizable_layout(Qt::Horizontal);
+  layout_.addWidget(&resizable_layout);
 
-  QTreeWidgetItem t_root(&tree); {
-    t_root.setText(0, "SmFile");
-    t_root.setText(1, path);
+  QTreeWidget *tree = new QTreeWidget();
+  tree->setColumnCount(2);
+  tree->setHeaderHidden(true);
+
+  auto *t_root = new QTreeWidgetItem(tree); {
+    t_root->setText(0, "SmFile");
+    t_root->setText(1, path);
   }
-  QTreeWidgetItem t_meta(&t_root); {
-    t_meta.setText(0, "Metadata");
+  auto t_meta = new QTreeWidgetItem(t_root); {
+    t_meta->setText(0, "Metadata");
   }
-  QTreeWidgetItem t_title(&t_meta); {
-    t_title.setText(0, "#TITLE"); t_title.setText(1, QString(smfile.title.c_str()));
+  auto t_title = new QTreeWidgetItem(t_meta); {
+    t_title->setText(0, "#TITLE"); t_title->setText(1, QString(smfile.title.c_str()));
   }
-  QTreeWidgetItem t_music(&t_meta); {
-    t_music.setText(0, "#MUSIC"); t_music.setText(1, QString(smfile.music.c_str()));
+  auto t_music = new QTreeWidgetItem(t_meta); {
+    t_music->setText(0, "#MUSIC"); t_music->setText(1, QString(smfile.music.c_str()));
   }
-  QTreeWidgetItem t_artist(&t_meta); {
-    t_artist.setText(0, "#ARTIST"); t_artist.setText(1, QString(smfile.artist.c_str()));
+  auto t_artist = new QTreeWidgetItem(t_meta); {
+    t_artist->setText(0, "#ARTIST"); t_artist->setText(1, QString(smfile.artist.c_str()));
   }
-  QTreeWidgetItem t_offset(&t_meta); {
-    t_offset.setText(0, "#OFFSET"); t_offset.setText(1, QString::number(smfile.offset));
+  auto t_offset = new QTreeWidgetItem(t_meta); {
+    t_offset->setText(0, "#OFFSET"); t_offset->setText(1, QString::number(smfile.offset));
   }
-  QTreeWidgetItem t_samplestart(&t_meta); {
-    t_samplestart.setText(0, "#SAMPLESTART"); t_samplestart.setText(1, QString::number(smfile.samplestart));
+  auto t_samplestart = new QTreeWidgetItem(t_meta); {
+    t_samplestart->setText(0, "#SAMPLESTART"); t_samplestart->setText(1, QString::number(smfile.samplestart));
   }
-  QTreeWidgetItem t_samplelength(&t_meta); {
-    t_samplelength.setText(0, "#SAMPLELENGTH"); t_samplelength.setText(1, QString::number(smfile.samplelength));
+  auto t_samplelength = new QTreeWidgetItem(t_meta); {
+    t_samplelength->setText(0, "#SAMPLELENGTH"); t_samplelength->setText(1, QString::number(smfile.samplelength));
   }
 
   QList<QTreeWidgetItem *> t_bpm_list;
-  QTreeWidgetItem t_bpms(&t_meta); {
-    t_bpms.setText(0, "#BPMS");
+  auto t_bpms = new QTreeWidgetItem(t_meta); {
+    t_bpms->setText(0, "#BPMS");
     for (auto time_bpm : smfile.bpms) {
       auto *t_bpm = new QTreeWidgetItem();
       t_bpm->setText(0, QString::number(time_bpm.beat_number));
       t_bpm->setText(1, QString::number(time_bpm.value)); // 'g' (default) or 'f', '3'
       t_bpm_list.push_back(t_bpm);
     }
-    t_bpms.addChildren(t_bpm_list);
+    t_bpms->addChildren(t_bpm_list);
   }
 
   QList<QTreeWidgetItem *> t_stop_list;
-  QTreeWidgetItem t_stops(&t_meta); {
-    t_stops.setText(0, "#STOPS");
+  auto t_stops = new QTreeWidgetItem(t_meta); {
+    t_stops->setText(0, "#STOPS");
     for (auto time_stop : smfile.stops) {
       auto *t_stop = new QTreeWidgetItem();
       t_stop->setText(0, QString::number(time_stop.beat_number));
       t_stop->setText(1, QString::number(time_stop.value)); // 'g' (default) or 'f', '3'
       t_stop_list.push_back(t_stop);
     }
-    t_bpms.addChildren(t_stop_list);
+    t_bpms->addChildren(t_stop_list);
   }
   
-
-  // tree.resizeColumnToContents(1);
-
-  QTreeWidgetItem t_diffs(&t_root);
-  t_diffs.setText(0, "Difficulties");
+  auto t_diffs = new QTreeWidgetItem(t_root);
+  t_diffs->setText(0, "Difficulties");
 
   size_t i = 0;
   for (auto diff : smfile.diffs) {
-    auto *t_diff = new QTreeWidgetItem(&t_diffs);
+    auto *t_diff = new QTreeWidgetItem(t_diffs);
     t_diff->setText(0, QString::number(i));
 
     auto *t_gametype = new QTreeWidgetItem(t_diff);
@@ -457,15 +468,23 @@ int main(int argc, char **argv) {
     }
     i++;
   }
-  tree.expandAll();
-  tree.resizeColumnToContents(0);
+  tree->expandAll();
+  tree->resizeColumnToContents(0);
+
 
 
   // -- must be already in the QTreeWidget (https://doc.qt.io/qt-6/qtreewidgetitem.html#setExpanded)
 
-  QHBoxLayout layout(&w_root);
+  // QHBoxLayout layout(&w_root);
   
-  layout.addWidget(&tree, 5);
+
+  
+  // QHBoxLayout resizable_layout;
+  // layout_.addLayout(&resizable_layout);
+  
+  // layout.addWidget(&tree, 5);
+  resizable_layout.addWidget(tree);
+  // resizable_layout.addWidget(tree);
 
   // QTextEdit viewer;
   // viewer.setReadOnly(true);
@@ -473,10 +492,12 @@ int main(int argc, char **argv) {
   // layout.addWidget(&viewer, 2);
 
 
-  // You can't scope these, they need to live somehow (on stack or heap).
-  // Also, if you make them static, it aborts on exit for some reason
-  // leaving just the indentation for now
-  QVBoxLayout preview_tile;
+  // -- You can't scope these, they need to live somehow (on stack or heap).
+  // -- Also, if you make them static, it aborts on exit for some reason
+  // -- leaving just the indentation for now
+  QWidget right_chunk;
+  QVBoxLayout preview_tile(&right_chunk);
+
     NoteDisplayWidget preview_actual;
       preview_actual.setAutoFillBackground(true);
       auto pal = preview_actual.palette();
@@ -565,15 +586,21 @@ int main(int argc, char **argv) {
       preview_controls.addWidget(&cmod_slider, 1);
       preview_controls.setAlignment(&cmod_slider, Qt::AlignCenter);
     preview_tile.addLayout(&preview_controls, 1);
-  layout.addLayout(&preview_tile, 4);
 
+  // layout.addLayout(&preview_tile, 4);
+  
+  // -- idk if this is correct
+  // 
+  // QWidget *right_chunk = new QWidget();
+  // right_chunk->setLayout(&preview_tile);
+  // resizable_layout.addWidget(right_chunk);
+  resizable_layout.addWidget(&right_chunk);
 
   w_root.show();
-
-
-
-
-  return app.exec();
+  int ret = app.exec();
+  delete tree;
+  tree = nullptr;
+  return ret;
 }
 
 #include "zerokara.moc"
