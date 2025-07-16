@@ -6,14 +6,6 @@
 
 SmFile smfile;
 
-// doesn't work! It still calls the parent destructor no matter what I do
-// class QSplitterExceptItDoesntFreeChildren : public QSplitter {
-// public:
-//   explicit QSplitterExceptItDoesntFreeChildren(QWidget* parent = nullptr) : QSplitter(parent) {};
-//   explicit QSplitterExceptItDoesntFreeChildren(Qt::Orientation orientation, QWidget* parent = nullptr) : QSplitter(orientation, parent) {};
-//   ~QSplitterExceptItDoesntFreeChildren() {};
-// };
-
 QColor qcolor_from_smticks(uint32_t smticks) {
   assert(smticks < 48);
 
@@ -53,6 +45,7 @@ std::array<NoteType, 4> notes_from_string(const char str[4]) {
   ret[3] = static_cast<NoteType>(str[3]);
   return ret;
 }
+
 // 20 and 28 are still useful sometimes, but maybe that should be in some checkbox
 int sm_sane_snap_higher_than(int snap) {
   for (auto bound : {1,2,4,8,12,16,24,32,36,48,64,96,192}) {
@@ -68,15 +61,10 @@ int sm_sane_snap_lower_than(int snap) {
 }
 
 struct NoteRowRects {
-  std::vector<QRectF> rects; // actually 1 .. 4 of them
+  std::vector<QRectF> rects; // 0 up to 4
   QColor color;
 };
 
-
-// NoteRowRects noterowrects_from_noterow(NoteRow note_row) {
-//   NoteRowRects ret = {};
-//   ret.rects.push_back(note_row.line[0]);
-// };
 
 // who cares, everyone uses 4/4
 double smticks_in_1_(int subdiv){return 192./subdiv;};
@@ -87,21 +75,18 @@ struct SmRelativePos {
   int32_t beats = 0;
   double smticks = 0;
 
-  // we assume 4/4
   static SmRelativePos incremented_by(SmRelativePos pos, double how_many_smticks) {
     pos.smticks += how_many_smticks;
     if (pos.smticks < 0) {
-      // stupid, idk how negative numbers work
-      int n_borrows = (int)((-pos.smticks + 47.999999) / 48.);
-      pos.beats -= n_borrows;
-      pos.smticks += 48 * n_borrows;
-      printf("smticks: %lf\n", pos.smticks);
-      if (-0.000001 < pos.smticks && pos.smticks < 0) { pos.smticks = 0; }
+      double n_borrows_from_beats = std::ceil(-(pos.smticks / 48.));
+      pos.beats -= (int)n_borrows_from_beats;
+      pos.smticks += 48.0 * n_borrows_from_beats;
       assert(pos.smticks >= 0);
     }
-    else if (pos.smticks >= 48) {
+    if (pos.smticks >= 48.) {
       pos.beats += (int)(pos.smticks / 48.);
-      pos.smticks = (int)pos.smticks % 48;
+      pos.smticks = std::fmod(pos.smticks, 48.);
+      assert(pos.smticks < 48.);
     }
 
     if (pos.beats >= 4) {
@@ -112,9 +97,11 @@ struct SmRelativePos {
       pos.measures -= n_borrows;
       pos.beats += 4 * n_borrows;
     }
+
+    if (-0.001 <= pos.smticks && pos.smticks < 0.001)   { pos.smticks = 0; }
     return pos;
   }
-  // WRONG, but let's allow this for now
+  // again, this assumes 4/4 everywhere
   double total_smticks() {
     return this->measures * 192 + this->beats * 48 + this->smticks;
   }
@@ -123,20 +110,17 @@ struct SmRelativePos {
 class NoteDisplayWidget : public QWidget {
 Q_OBJECT
 
-  // upscroll is natural to think about in normal coordinates
-  // (screen y grows downwards)
-
 public:
   bool downscroll = false;
   int cmod = 400;
   const double PX_VISUAL_OFFSET_FROM_HORIZ_LINE = 30.0;
   double px_of_measure_zero = PX_VISUAL_OFFSET_FROM_HORIZ_LINE;
 
-  // instead of incrementing / decrementing pixel offset directly, let's keep track of the
-  // precise relative position and then recalculate the pixels on scroll
+  // instead of incrementing / decrementing pixel offset directly,
+  // keep track of the precise relative position and then recalculate the pixels on scroll
   SmRelativePos cur_chart_pos = {0};
   
-  // let's say this means 16ths, yeah whatever it's wrong but let's do the simplest thing for now
+  // let's say this means 16ths, again 4/4 yada yada
   int current_snap_nths = 16;
 
 
@@ -179,6 +163,7 @@ public:
         current_snap_nths = std::max(new_snap, 1);
       } else {
         auto new_pos = SmRelativePos::incremented_by(cur_chart_pos, -smticks_in_1_(current_snap_nths));
+        printf("new_pos: %d:%d:%lg\n", new_pos.measures, new_pos.beats, new_pos.smticks);
         cur_chart_pos = (new_pos.measures < 0) ? (SmRelativePos){0} : new_pos;
       }
     } else {
@@ -210,62 +195,62 @@ public:
     int32_t px_judge_line_off = 30;
     int32_t left_start = this->width() / 2 - (int32_t)(2 * note_width); // for centering
 
-
-
-  
-    // draw judge line
-    auto judge_line = QLine(0, px_judge_line_off, this->width()-1, px_judge_line_off);
-    if (downscroll) {
-      int new_y = this->height() - judge_line.y1();
-      judge_line.setLine(0, new_y, this->width()-1, new_y);
-    }
     QPen pen;
-    pen.setWidth(5); pen.setColor(Qt::white); painter.setPen(pen);
-    painter.drawLine(judge_line);
+ 
+    // draw judge line
+    {
+      auto judge_line = QLine(0, px_judge_line_off, this->width()-1, px_judge_line_off);
+      if (downscroll) {
+        int new_y = this->height() - judge_line.y1();
+        judge_line.setLine(0, new_y, this->width()-1, new_y);
+      }
+      pen.setWidth(5); pen.setColor(Qt::white); painter.setPen(pen);
+      painter.drawLine(judge_line);
+    }
 
     // draw corner beams around the left and right edge of playfield
-    auto left_edge  = QLineF(left_start,              0, left_start,               this->height()-1);
-    auto right_edge = QLineF(left_start+note_width*4, 0, left_start+note_width*4,  this->height()-1);
-    pen.setWidth(2); pen.setColor(Qt::gray); painter.setPen(pen);
-    painter.drawLine(left_edge);
-    painter.drawLine(right_edge);
+    {
+      auto left_edge  = QLineF(left_start,              0, left_start,               this->height()-1);
+      auto right_edge = QLineF(left_start+note_width*4, 0, left_start+note_width*4,  this->height()-1);
+      pen.setWidth(2); pen.setColor(Qt::gray); painter.setPen(pen);
+      painter.drawLine(left_edge);
+      painter.drawLine(right_edge);
+    }
 
-    // draw snap lines
-    // SmRelativePos snap_of_earliest_snapline = {
-    //   .measures = cur_chart_pos.measures == 0 ? 0 : cur_chart_pos.measures-1,
-    //   .beats = 0,
-    //   .smticks = 0
-    // };
-    // SmRelativePos snap_of_this_snapline = snap_of_earliest_snapline;
-    SmRelativePos snap_of_this_snapline = cur_chart_pos;
-    snap_of_this_snapline.measures -= 1;
+    // draw snaplines, starting from previous measure
+    {
+      SmRelativePos snap_of_this_snapline = cur_chart_pos;
+      auto s = &snap_of_this_snapline;
+      s->measures -= 1;
 
-    // printf("---------------\n");
-    for (int i = 0; i < 300; i++) {
-      int y_dist = (int)(px_of_measure_zero + snap_of_this_snapline.total_smticks() * px_per_smtick());
-      if (y_dist < 0) {
-        // printf("NOT drawing line at ydist=%d, smticks == %d, px_chart_start_off %d\n", y_dist, (int32_t)snap_of_this_snapline.smticks, (int)px_of_measure_zero);
-        snap_of_this_snapline = SmRelativePos::incremented_by(snap_of_this_snapline, 192.0/current_snap_nths);
-        continue;
+      // printf("---------------\n");
+      for (int i = 0; i < 300; i++) {
+        double y_distance = px_of_measure_zero + s->total_smticks() * px_per_smtick();
+        // printf("snap of this snapline: %d:%d:%lg, which translates to %lg px\n",
+        //        s->measures, s->beats, s->smticks, y_distance);
+
+        if (y_distance < 0.0) {
+          *s = SmRelativePos::incremented_by(*s, 192.0/current_snap_nths);
+          continue;
+        }
+        if (y_distance > this->height()) { break; }
+        double y = downscroll ? (double)this->height() - y_distance : y_distance;
+
+        QColor color = qcolor_from_smticks((uint32_t)s->smticks);
+        pen.setColor(color);
+        pen.setWidth(color == Qt::red ? 3 : color == Qt::blue ? 2 : 1);
+        painter.setPen(pen);
+        auto snap_line = QLineF(left_start, y, left_start + 4 * note_width, y);
+        painter.drawLine(snap_line);
+
+        *s = SmRelativePos::incremented_by(*s, 192.0/current_snap_nths);
       }
-      if (y_dist > 1000) { break; /* boo, use proper height */}
-      int y = downscroll ? this->height() - y_dist : y_dist;
-
-      QColor color = qcolor_from_smticks((uint32_t)snap_of_this_snapline.smticks);
-      pen.setColor(color);
-      pen.setWidth(color == Qt::red ? 3 : color == Qt::blue ? 2 : 1);
-      painter.setPen(pen);
-      auto snap_line = QLineF(left_start, y, left_start + 4 * note_width, y);
-      painter.drawLine(snap_line);
-
-      snap_of_this_snapline = SmRelativePos::incremented_by(snap_of_this_snapline, 192.0/current_snap_nths);
     }
 
 
     std::function<NoteRowRects(NoteRow)>
     rectangles_at_smtick_pos = [&](NoteRow row)
     {
-      /*, int32_t left_start, int32_t note_width, int32_t note_height, double px_per_smtick, double px_chart_start_off */
       uint32_t global_smticks = row.smticks + row.beat * 48 + row.measure * 48 * 4;
 
       auto line = (NoteRowRects){
