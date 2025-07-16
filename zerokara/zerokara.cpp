@@ -155,28 +155,31 @@ public:
   /// ctrl+shift -> change snap (fine)
   void wheelEvent(QWheelEvent *event) override {
     auto modifiers = QGuiApplication::keyboardModifiers();
-    if ((event->angleDelta().ry() < 0) ^ !downscroll) {
-      if (modifiers & Qt::ControlModifier) {
-        int new_snap = (modifiers & Qt::ShiftModifier)
-                     ? current_snap_nths-1
-                     : sm_sane_snap_lower_than(current_snap_nths);
-        current_snap_nths = std::max(new_snap, 1);
+    SmRelativePos new_pos;
+
+    if (modifiers & Qt::ControlModifier) { // change snap
+      if (event->angleDelta().ry() < 0) {
+        current_snap_nths =
+          (modifiers & Qt::ShiftModifier)
+          ? std::max(current_snap_nths-1, 1)
+          : sm_sane_snap_lower_than(current_snap_nths)
+        ;
       } else {
-        auto new_pos = SmRelativePos::incremented_by(cur_chart_pos, -smticks_in_1_(current_snap_nths));
-        printf("new_pos: %d:%d:%lg\n", new_pos.measures, new_pos.beats, new_pos.smticks);
-        cur_chart_pos = (new_pos.measures < 0) ? (SmRelativePos){0} : new_pos;
+        current_snap_nths =
+          (modifiers & Qt::ShiftModifier)
+          ? std::min(current_snap_nths+1, 192)
+          : sm_sane_snap_higher_than(current_snap_nths)
+        ;
       }
-    } else {
-      if (modifiers & Qt::ControlModifier) {
-        int new_snap = (modifiers & Qt::ShiftModifier)
-                     ? current_snap_nths+1
-                     : sm_sane_snap_higher_than(current_snap_nths);
-        current_snap_nths = std::min(new_snap, 192);
+    } else { // move
+      if ((event->angleDelta().ry() < 0) ^ !downscroll) {
+        new_pos = SmRelativePos::incremented_by(cur_chart_pos, -smticks_in_1_(current_snap_nths));
       } else {
-        auto new_pos = SmRelativePos::incremented_by(cur_chart_pos, +smticks_in_1_(current_snap_nths));
-        cur_chart_pos = (new_pos.measures < 0) ? (SmRelativePos){0} : new_pos;
+        new_pos = SmRelativePos::incremented_by(cur_chart_pos, +smticks_in_1_(current_snap_nths));
       }
     }
+    cur_chart_pos = (new_pos.measures < 0) ? (SmRelativePos){0} : new_pos;
+
     // printf("raw smticks: %d\n", chart_pos.raw_smticks());
     px_of_measure_zero = PX_VISUAL_OFFSET_FROM_HORIZ_LINE - px_per_smtick() * cur_chart_pos.total_smticks();
     this->update();
