@@ -3,6 +3,7 @@
 // C++
 #include "precompiled.h"
 #include <QSplitter>
+#include <QTabWidget>
 
 SmFile smfile;
 
@@ -346,9 +347,13 @@ int main(int argc, char **argv) {
   smfile = std::get<SmFile>(smfile_opt);
 
 
-  QWidget w_root;
+  QWidget *w_root = new QWidget();
+
+  QTabWidget w_tabs_root;
+  w_tabs_root.addTab(w_root, path);
+
     // -- required so that it fills the entire space
-  QHBoxLayout layout_(&w_root);
+  QHBoxLayout layout_(w_root);
 
   QSplitter resizable_layout(Qt::Horizontal);
   layout_.addWidget(&resizable_layout);
@@ -357,11 +362,7 @@ int main(int argc, char **argv) {
   tree->setColumnCount(2);
   tree->setHeaderHidden(true);
 
-  auto *t_root = new QTreeWidgetItem(tree); {
-    t_root->setText(0, "SmFile");
-    t_root->setText(1, path);
-  }
-  auto t_meta = new QTreeWidgetItem(t_root); {
+  auto t_meta = new QTreeWidgetItem(tree); {
     t_meta->setText(0, "Metadata");
   }
   auto t_title = new QTreeWidgetItem(t_meta); {
@@ -407,7 +408,7 @@ int main(int argc, char **argv) {
     t_bpms->addChildren(t_stop_list);
   }
   
-  auto t_diffs = new QTreeWidgetItem(t_root);
+  auto t_diffs = new QTreeWidgetItem(tree);
   t_diffs->setText(0, "Difficulties");
 
   size_t i = 0;
@@ -584,7 +585,7 @@ int main(int argc, char **argv) {
   // resizable_layout.addWidget(right_chunk);
   resizable_layout.addWidget(&right_chunk);
 
-  w_root.show();
+  w_tabs_root.show();
   int ret = app.exec();
   delete tree;
   tree = nullptr;

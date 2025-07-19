@@ -4,7 +4,7 @@
 
 QT = widgets
 TEMPLATE = app
-TARGET = splitter
+TARGET = testing
 INCLUDEPATH += .
 
 # You can make your code fail to compile if you use deprecated APIs.
@@ -15,4 +15,5 @@ INCLUDEPATH += .
 #DEFINES += QT_DISABLE_DEPRECATED_UP_TO=0x060000 # disables all APIs deprecated in Qt 6.0.0 and earlier
 
 # Input
-SOURCES += splitter.cpp
+# SOURCES += splitter.cpp
+SOURCES += tabbar.cpp
