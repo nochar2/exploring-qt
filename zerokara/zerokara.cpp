@@ -4,9 +4,13 @@
 #include "precompiled.h"
 #include <QSplitter>
 #include <QTabWidget>
+#include <sys/inotify.h>
+#include <sys/inotify.h>
+#include <unistd.h>
 
 SmFile smfile;
 
+// -- I might want to unify these two maybe ???
 QColor qcolor_from_smticks(uint32_t smticks) {
   assert(smticks < 48);
 
@@ -24,10 +28,11 @@ QColor qcolor_from_smticks(uint32_t smticks) {
   }
   return QColorConstants::Gray;
 }
+// this is for the Snap xx highlight
 const char *cstr_color_from_snap (int snap) {
   switch (snap) {
     case 1: case 2: case 4: return "red";
-    case 8: return "royalblue";
+    case 8: return "blue";
     case 3: case 6: case 12: return "green"; // limegreen
     case 16: return "goldenrod";
     case 24: return "magenta";
@@ -312,12 +317,34 @@ public:
 };
 
 
+__attribute__((noreturn))
+void *exec_yourself(void *arg) {
+  int inotify_fd = *(int *)arg;
+  char dontcare[1];
+  // should block until the binary changes
+  printf("In exec_yourself(), waiting on ATTRIB change of the binary file.\n");
+  // spam if the binary is gone for a moment
+  while(1) {
+    read(inotify_fd, dontcare, 1);
+    int minusone_if_it_fails = execl("./zerokara", "./zerokara", NULL); (void)minusone_if_it_fails;
+    // perror("I couldn't exec myself");
+  }
+  // if we ever got here, we failed.
+  assert(false);
+}
+
 int main(int argc, char **argv) {
   // -- make float parsing not break in Czech locale
-  // -- XXX: why does this not work?
+  // -- XXX: why does this not work? For now, setting it
+  // -- nearby float parsing.
   // QLocale locale("C");
   // QLocale::setDefault(locale);
 
+  // let's try the hot restart thing.
+  int inotify_fd = inotify_init1(IN_CLOEXEC);
+  inotify_add_watch(inotify_fd, argv[0], IN_ATTRIB);
+  pthread_t inotify_reader;
+  pthread_create(&inotify_reader, NULL, exec_yourself, &inotify_fd);
 
   // -- QGuiApplication doesn't work if you want widgets
   QApplication app(argc, argv);
@@ -569,7 +596,6 @@ int main(int argc, char **argv) {
           &cmod_value,
           [&](int value){ cmod_value.setText(QString("CMOD: \n%1").arg(value)); }
         );
-          
         cmod_value.setText(QString("CMOD: \n%1").arg(cmod_slider.value())); // set initial
         preview_actual.onCmodChange(cmod_slider.value());
       preview_controls.addWidget(&cmod_slider, 1);

@@ -37,6 +37,7 @@ const char *cstr_from_difftype(DiffType dt)
   }
   assert(false);
 }
+
 QColor qcolor_from_difftype(DiffType dt)
 {
   switch (dt) {
