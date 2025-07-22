@@ -9,6 +9,26 @@ using namespace std::string_literals;
 
 #define eprintf(...) fprintf(stderr, __VA_ARGS__)
 
+size_t Difficulty::total_note_rows() {
+  size_t n = 0;
+  for (auto m : this->measures) {
+    for (auto _ : m.note_rows) {
+      n += 1;
+    }
+  }
+  return n;
+}
+// naive and slow, but let's do it for now
+std::vector<NoteRow> Difficulty::note_rows() {
+  std::vector<NoteRow> ret;
+  for (auto m : this->measures) {
+    for (auto nl : m.note_rows) {
+      ret.push_back(nl);
+    }
+  }
+  return ret;
+}
+
 bool smfile_key_is_string_type(string_view sv) {
   // possibly more
   auto str_keys = {
@@ -384,19 +404,30 @@ smfile_from_string_opt(string const& str)
           }
 
           size_t i = 0;
-          for (auto m : current_measure_pre) {
-            if (!std::all_of(m.line.begin(), m.line.end(), [](auto x){return x == NoteType::None;})) {
-              m.beat    = (uint8_t)((i * beats_per_measure * 48 / pats_per_measure) / 48);
-              m.smticks = (uint8_t)((i * beats_per_measure * 48 / pats_per_measure) % 48);
-              m.sec_zero_offset = secs_per_beat * (m.beat + m.smticks / 48.);
-              diff.note_rows.push_back(m);
+          // -- TODO: make a span of this measure
+          // -- Problem (at least one): this whole thing can get reallocated, and if it does,
+          // -- your span points to invalid memory and you segfault. 
+          // size_t notelines_in_this_measure = 0;
+          // auto begin
+          Measure m;
+          for (auto nl : current_measure_pre) {
+            if (!std::all_of(nl.line.begin(), nl.line.end(), [](auto x){return x == NoteType::None;})) {
+              nl.beat    = (uint8_t)((i * beats_per_measure * 48 / pats_per_measure) / 48);
+              nl.smticks = (uint8_t)((i * beats_per_measure * 48 / pats_per_measure) % 48);
+              nl.sec_zero_offset = secs_per_beat * (nl.beat + nl.smticks / 48.);
+              // notelines_in_this_measure += 1;
+              m.note_rows.push_back(nl);
             }
             i++;
           }
+          diff.measures.push_back(m);
+          // auto note_span = std::span(notelines_in_this_measure)
+          // diff.as_measures.push_back(MeasureInfo(note_span, notelines_in_this_measure));
+
           measure_i += 1;
         } // for all measures
 
-        eprintf("I: Parsed a diff with %lu noterows\n", diff.note_rows.size());
+        eprintf("I: Parsed a diff with %lu noterows\n", diff.total_note_rows());
         smfile.diffs.push_back(diff);
       } // (NoteInfo parsing scope)
     } // else if (key == "#NOTES") {

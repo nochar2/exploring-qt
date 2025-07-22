@@ -1,3 +1,4 @@
+#include "qtreewidget.h"
 #include "sm_parser.cpp"
 
 // C++
@@ -11,8 +12,9 @@
 SmFile smfile;
 
 // -- I might want to unify these two maybe ???
-QColor qcolor_from_smticks(uint32_t smticks) {
-  assert(smticks < 48);
+QColor qcolor_from_smticks(double smticks) {
+  assert(smticks <= 48.0);
+  if (smticks == 48.0) smticks = 0.0; // can happen due to rounding up
 
   std::vector<std::pair<uint32_t,QColor>> snap_to_color = {
     { (192/4),  QColorConstants::Red },
@@ -24,7 +26,7 @@ QColor qcolor_from_smticks(uint32_t smticks) {
     { (192/48), QColorConstants::Cyan },
   };
   for (auto [s,c] : snap_to_color) {
-    if (smticks % s == 0) return c;
+    if (std::fmod(smticks, s) == 0) return c;
   }
   return QColorConstants::Gray;
 }
@@ -104,7 +106,9 @@ struct SmRelativePos {
       pos.beats += 4 * n_borrows;
     }
 
-    if (-0.001 <= pos.smticks && pos.smticks < 0.001)   { pos.smticks = 0; }
+    // Try to cancel out floating point errors like .00...1 or .99...9
+    double deviation = pos.smticks - round(pos.smticks);
+    if (abs(deviation) < 0.0001) { pos.smticks -= deviation; }
     return pos;
   }
   // again, this assumes 4/4 everywhere
@@ -245,9 +249,19 @@ public:
         if (y_distance > this->height()) { break; }
         double y = downscroll ? (double)this->height() - y_distance : y_distance;
 
-        QColor color = qcolor_from_smticks((uint32_t)s->smticks);
+        // -- In SM/Etterna, actual notes will have weird colors on weird snaps
+        // -- because they are snapped to the nearest smtick (at least that's how
+        // -- they are stored in most files).
+        // -- There should be some checkbox somewhere if we want smticks to be int
+        // -- or float and only quantized on save. We don't want to break existing
+        // -- 28th colored streams for example.
+        // QColor color = qcolor_from_smticks((int32_t)roundl(s->smticks));
+        QColor color = qcolor_from_smticks(s->smticks);
         pen.setColor(color);
-        pen.setWidth(color == Qt::red ? 3 : color == Qt::blue ? 2 : 1);
+        pen.setWidth(
+          std::fmod(s->smticks, 48.) == 0 ? 3 :
+          std::fmod(s->smticks, 24.) == 0 ? 2 : 1
+         );
         painter.setPen(pen);
         auto snap_line = QLineF(left_start, y, left_start + 4 * note_width, y);
         painter.drawLine(snap_line);
@@ -280,24 +294,11 @@ public:
     };
 
 
-    // whatever name for 1..4 notes at one place
-    std::vector<NoteRow>& note_rows = smfile.diffs[0].note_rows;
-    // std::vector<NoteRow> note_rows = {
-    //   (NoteRow){.measure=0, .beat=0, .smticks=(uint8_t)(ticks_per_1_(16)*0), .sec=0., .line=notes_from_string("1111")},
-    //   (NoteRow){.measure=0, .beat=0, .smticks=(uint8_t)(ticks_per_1_(16)*1), .sec=0., .line=notes_from_string("0100")},
-    //   (NoteRow){.measure=0, .beat=0, .smticks=(uint8_t)(ticks_per_1_(16)*2), .sec=0., .line=notes_from_string("0010")},
-    //   (NoteRow){.measure=0, .beat=0, .smticks=(uint8_t)(ticks_per_1_(16)*3), .sec=0., .line=notes_from_string("0001")},
-    // };
+    // might be very slow for now
+    std::vector<NoteRow> note_rows = smfile.diffs[0].note_rows();
 
     std::vector<NoteRowRects> rectangles;
     std::transform(note_rows.begin(), note_rows.end(), std::back_inserter(rectangles), [&](NoteRow nr) {return rectangles_at_smtick_pos(nr);});
-
-    // std::vector<NoteRowRects> rectangles = {
-    //   rectangles_at_smtick_pos(0, (int)(ticks_per_1_(16))*0,  0b1111),
-    //   rectangles_at_smtick_pos(0, (int)(ticks_per_1_(16))*1,  0b0100),
-    //   rectangles_at_smtick_pos(0, (int)(ticks_per_1_(16))*2,  0b0010),
-    //   rectangles_at_smtick_pos(0, (int)(ticks_per_1_(16))*3,  0b0001),
-    // };
 
     QRectF cont_rect = this->contentsRect();
 
@@ -322,11 +323,11 @@ void *exec_yourself(void *arg) {
   int inotify_fd = *(int *)arg;
   char dontcare[1];
   // should block until the binary changes
-  printf("In exec_yourself(), waiting on ATTRIB change of the binary file.\n");
+  printf("\nI: The app will be restarted when the ./zerokara binary changes.\n");
   // spam if the binary is gone for a moment
   while(1) {
-    read(inotify_fd, dontcare, 1);
-    int minusone_if_it_fails = execl("./zerokara", "./zerokara", NULL); (void)minusone_if_it_fails;
+    ssize_t read_bytes = read(inotify_fd, dontcare, 1); (void)(read_bytes);
+    int minusone_on_fail = execl("./zerokara", "./zerokara", NULL); (void)(minusone_on_fail);
     // perror("I couldn't exec myself");
   }
   // if we ever got here, we failed.
@@ -391,6 +392,7 @@ int main(int argc, char **argv) {
 
   auto t_meta = new QTreeWidgetItem(tree); {
     t_meta->setText(0, "Metadata");
+    t_meta->setExpanded(true);
   }
   auto t_title = new QTreeWidgetItem(t_meta); {
     t_title->setText(0, "#TITLE"); t_title->setText(1, QString(smfile.title.c_str()));
@@ -413,7 +415,7 @@ int main(int argc, char **argv) {
 
   QList<QTreeWidgetItem *> t_bpm_list;
   auto t_bpms = new QTreeWidgetItem(t_meta); {
-    t_bpms->setText(0, "#BPMS");
+    t_bpms->setText(0, "#BPMS"); t_bpms->setExpanded(true);
     for (auto time_bpm : smfile.bpms) {
       auto *t_bpm = new QTreeWidgetItem();
       t_bpm->setText(0, QString::number(time_bpm.beat_number));
@@ -425,7 +427,7 @@ int main(int argc, char **argv) {
 
   QList<QTreeWidgetItem *> t_stop_list;
   auto t_stops = new QTreeWidgetItem(t_meta); {
-    t_stops->setText(0, "#STOPS");
+    t_stops->setText(0, "#STOPS"); t_stops->setExpanded(true);
     for (auto time_stop : smfile.stops) {
       auto *t_stop = new QTreeWidgetItem();
       t_stop->setText(0, QString::number(time_stop.beat_number));
@@ -436,12 +438,13 @@ int main(int argc, char **argv) {
   }
   
   auto t_diffs = new QTreeWidgetItem(tree);
-  t_diffs->setText(0, "Difficulties");
+  t_diffs->setText(0, "Difficulties"); t_diffs->setExpanded(true);
 
   size_t i = 0;
   for (auto diff : smfile.diffs) {
     auto *t_diff = new QTreeWidgetItem(t_diffs);
     t_diff->setText(0, QString::number(i));
+    t_diff->setExpanded(true);
 
     auto *t_gametype = new QTreeWidgetItem(t_diff);
     t_gametype->setText(0, "Game type");
@@ -463,28 +466,43 @@ int main(int argc, char **argv) {
     t_diffval->setText(1, QString::number(diff.diff_num));
 
     auto *t_notes = new QTreeWidgetItem(t_diff);
-    t_notes->setText(0, QString("Note rows (%1)").arg(diff.note_rows.size()));
+    t_notes->setText(0, QString("Note rows (%1)").arg(diff.total_note_rows()));
 
-    for (auto note : diff.note_rows) {
-      auto *t_note = new QTreeWidgetItem(t_notes);
-      t_note->setText(0, QString("%1/%2/%3").arg(note.measure).arg(note.beat).arg(note.smticks));
-      QString line;
-      for (auto n : note.line) { line.push_back(static_cast<char>(n)); }
-      t_note->setText(1, line);
+    auto *t_as_measures = new QTreeWidgetItem(t_diff);
+    t_as_measures->setText(0, QString("Measures (%1)").arg(diff.measures.size()));
+    int measure_i = 0;
 
-      // t_note->setTextAlignment()
-      // QFont font;
-      // t_note->setFont(int column, const QFont &afont)
-      
-      // -- kinda ugly, but coloring parts of text seems nearly impossible (there is like QStyledItemDelegate with no sane examples)
-      QColor snap_color = qcolor_from_smticks(note.smticks);
-      snap_color.setAlpha(30); // 0 is fully transparent
-      QBrush brush(snap_color);
-      t_note->setBackground(1, brush);
+    auto draw_note_rows = [&](QTreeWidgetItem *t_parent, std::vector<NoteRow> const& note_rows) {
+      for (auto nl : note_rows) {
+        auto *t_noteline = new QTreeWidgetItem(t_parent);
+        t_noteline->setText(0, QString("%1/%2/%3")
+                            .arg(nl.measure).arg(nl.beat).arg(nl.smticks));
+        QString line_s;
+        for (auto n : nl.line) { line_s.push_back(static_cast<char>(n)); }
+        t_noteline->setText(1, line_s);
+
+        QColor snap_color = qcolor_from_smticks(nl.smticks);
+        snap_color.setAlpha(30); // 0 is fully transparent
+        QBrush brush(snap_color);
+        t_noteline->setBackground(1, brush);
+      }
+      measure_i += 1;
+    };
+
+    for (auto m : diff.measures) {
+      auto *t_measure = new QTreeWidgetItem(t_as_measures);
+      t_measure->setText(0, QString("%1 (%2 row%3)")
+                         .arg(measure_i)
+                         .arg(m.note_rows.size())
+                         .arg(m.note_rows.size() == 1 ? "" : "s")
+      );
+      draw_note_rows(t_measure, m.note_rows);
     }
+    draw_note_rows(t_notes, diff.note_rows());
+
     i++;
   }
-  tree->expandAll();
+  // tree->expandAll();
   tree->resizeColumnToContents(0);
 
 
