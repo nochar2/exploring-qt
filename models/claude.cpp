@@ -79,14 +79,14 @@ public:
 };
 
 // Custom model that manages your internal data
-class KeyValueTreeModel : public QStandardItemModel {
+class KVTreeModel : public QStandardItemModel {
     Q_OBJECT
     
 private:
     QList<DataItem> m_data;
     
 public:
-    KeyValueTreeModel(QObject* parent = nullptr) : QStandardItemModel(parent) {
+    KVTreeModel(QObject* parent = nullptr) : QStandardItemModel(parent) {
         setHorizontalHeaderLabels({"Key", "Value"});
         
         // Initialize with some sample data
@@ -154,7 +154,7 @@ class TreeViewWidget : public QWidget {
     
 private:
     QTreeView* m_treeView;
-    KeyValueTreeModel* m_model;
+    KVTreeModel* m_model;
     ComboBoxDelegate* m_delegate;
     
 public:
@@ -162,7 +162,7 @@ public:
         QVBoxLayout* layout = new QVBoxLayout(this);
         
         m_treeView = new QTreeView(this);
-        m_model = new KeyValueTreeModel(this);
+        m_model = new KVTreeModel(this);
         m_delegate = new ComboBoxDelegate(this);
         
         m_treeView->setModel(m_model);
@@ -176,7 +176,7 @@ public:
         
         layout->addWidget(m_treeView);
 
-        connect(m_model, &KeyValueTreeModel::priorityChanged,
+        connect(m_model, &KVTreeModel::priorityChanged,
         this, &TreeViewWidget::onPriorityChanged);
 
     }

@@ -45,17 +45,14 @@ bool smfile_key_is_double_type(string_view sv) {
                      [&](auto k){return k == sv;});
 }
 
+std::vector<const char *> difftype_cstrs = {
+  {"Beginner", "Easy", "Medium", "Hard", "Challenge", "Edit"}
+};
+
 const char *cstr_from_difftype(DiffType dt)
 {
-  switch (dt) {
-    case DiffType::Beginner:  return "Beginner";
-    case DiffType::Easy:      return "Easy";
-    case DiffType::Medium:    return "Medium";
-    case DiffType::Hard:      return "Hard";
-    case DiffType::Challenge: return "Challenge";
-    case DiffType::Edit:      return "Edit";
-  }
-  assert(false);
+  size_t idx = (size_t)dt;
+  return difftype_cstrs[idx];
 }
 
 QColor qcolor_from_difftype(DiffType dt)

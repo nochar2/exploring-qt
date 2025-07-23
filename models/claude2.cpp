@@ -46,8 +46,8 @@ enum class ValueType {
 
 
 using DataType = std::variant<QString,Priority>;
-// this allows you to interop between std::variant and QVariant
-Q_DECLARE_METATYPE(DataType);
+// this allows you to interop between std::variant and QVariant ????????
+// Q_DECLARE_METATYPE(DataType);
 
 struct DataItem {
     QString key;
@@ -55,13 +55,13 @@ struct DataItem {
     DataType value;
 };
 
-class KeyValueTreeModel : public QStandardItemModel {
+class KVTreeModel : public QStandardItemModel {
     Q_OBJECT
 
 public:
     QList<DataItem> m_data;
 
-    KeyValueTreeModel(QObject* parent = nullptr) : QStandardItemModel(parent) {
+    KVTreeModel(QObject* parent = nullptr) : QStandardItemModel(parent) {
         setHorizontalHeaderLabels({"Key", "Value"});
         
         // Initialize with different types of data
@@ -106,7 +106,7 @@ public:
     
     bool setData(const QModelIndex& index, const QVariant& value, int role = Qt::EditRole) override {
         if (role == Qt::EditRole && index.column() == 1) {
-            // Update internal data when value changes
+            // Update internal data when setting a new value
             if (index.row() < m_data.size()) {
                 QString newValue = value.toString();
                 
@@ -175,12 +175,12 @@ signals:
 
 
 // Custom delegate for different value types
-class ComboBoxDelegate : public QStyledItemDelegate {
+class KVTreeViewDelegate : public QStyledItemDelegate {
 private:
-    KeyValueTreeModel* m_model;
+    KVTreeModel* m_model;
     
 public:
-    ComboBoxDelegate(KeyValueTreeModel* model, QObject* parent = nullptr) 
+    KVTreeViewDelegate(KVTreeModel* model, QObject* parent = nullptr) 
         : QStyledItemDelegate(parent), m_model(model) {}
     
     QWidget* createEditor(QWidget* parent, const QStyleOptionViewItem& option, 
@@ -217,8 +217,8 @@ class TreeViewWidget : public QWidget {
     
 private:
     QTreeView* m_treeView;
-    KeyValueTreeModel* m_model;
-    ComboBoxDelegate* m_delegate;
+    KVTreeModel* m_model;
+    KVTreeViewDelegate* m_delegate;
     
 public:
     TreeViewWidget(QWidget* parent = nullptr) : QWidget(parent) {
@@ -226,8 +226,8 @@ public:
         QVBoxLayout* layout = new QVBoxLayout(this);
         
         m_treeView = new QTreeView(this);
-        m_model = new KeyValueTreeModel(this);
-        m_delegate = new ComboBoxDelegate(m_model, this);
+        m_model    = new KVTreeModel(this);
+        m_delegate = new KVTreeViewDelegate(m_model, this);
         
         m_treeView->setModel(m_model);
         m_treeView->setItemDelegate(m_delegate);
@@ -240,9 +240,9 @@ public:
         
         layout->addWidget(m_treeView);
     
-        connect(m_model, &KeyValueTreeModel::priorityChanged,
+        connect(m_model, &KVTreeModel::priorityChanged,
                 this, &TreeViewWidget::onPriorityChanged);
-        connect(m_model, &KeyValueTreeModel::stringChanged,
+        connect(m_model, &KVTreeModel::stringChanged,
                 this, &TreeViewWidget::onStringChanged);
     }
     

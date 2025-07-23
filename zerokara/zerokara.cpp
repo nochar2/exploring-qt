@@ -5,9 +5,13 @@
 #include <QSplitter>
 #include <QTabWidget>
 #include <QStandardItemModel>
+#include <QStyledItemDelegate>
 #include <sys/inotify.h>
 #include <unistd.h>
 #include <variant>
+#include <QComboBox>
+#include <QLineEdit>
+#include <QSpinBox>
 
 SmFile smfile;
 
@@ -327,48 +331,55 @@ __attribute__((noreturn))
 void *exec_yourself(void *arg) {
   int inotify_fd = *(int *)arg;
   char dontcare[1];
-  // should block until the binary changes
   printf("\nI: The app will be restarted when the ./zerokara binary changes.\n");
-  // spam if the binary is gone for a moment
-  while(1) {
-    ssize_t read_bytes = read(inotify_fd, dontcare, 1); (void)(read_bytes);
+  while(1) { // -- spam while the binary is momentarily gone
+    ssize_t read_bytes = read(inotify_fd, dontcare, 1);             (void)(read_bytes);
     int minusone_on_fail = execl("./zerokara", "./zerokara", NULL); (void)(minusone_on_fail);
-    // perror("I couldn't exec myself");
   }
-  // if we ever got here, we failed.
-  assert(false);
 }
 
 
-// this is messed up :(
+
+// -- sadly this has to be out here in global scope
+// Q_DECLARE_METATYPE(TreeValue);
+
+class Cell : public QStandardItem {
+  public:
+  // -- just for setEditable(false) and less typing
+  Cell() : QStandardItem() {
+  }
+  Cell(QString str) : QStandardItem(str) {
+    // this->setEditable(false);
+  };
+};
 using TimeKVs      = std::vector<TimeKV>;
 using Difficulties = std::vector<Difficulty>;
-
 using TreeValue = std::variant<
   std::string,
   double,
   std::vector<TimeKV>,
-  std::vector<Difficulty>
+  std::vector<Difficulty>,
+  DiffType
 >;
-
-// just so I don't have to spam setEditable(false) everywhere
-class Cell : public QStandardItem {
-  public:
-  Cell(QString str) : QStandardItem(str) {
-    this->setEditable(false);
-  };
-};
-
 Q_DECLARE_METATYPE(TreeValue);
-struct TreeItem {
-  QString key;
-  TreeValue value;
-};
+
+struct TreeItem { QString key; TreeValue value; };
+
 struct KVTreeModel : public QStandardItemModel {
+
   Q_OBJECT
 public:
 
-  KVTreeModel(const SmFile &smfile) : QStandardItemModel() {
+  // so, idk, this should be modified on change but idk how to pass the pointers
+  // through hell and back and contorted through QVariants which don't like double * for some reason
+  SmFile &smfile;
+
+  KVTreeModel(SmFile &smfile) : QStandardItemModel(), smfile(smfile) {
+    redraw_yourself();
+  }
+
+  void redraw_yourself() {
+    clear();
     
     this->setColumnCount(2);
 
@@ -376,16 +387,26 @@ public:
 
     // HACK: throw all SmFile fields on one temporary pile so the code is shorter.
     QList<TreeItem> mtdt_fields;
-    mtdt_fields.append({("#TITLE"),        (smfile.title)});
-    mtdt_fields.append({("#MUSIC"),        (smfile.music)});
-    mtdt_fields.append({("#ARTIST"),       (smfile.artist)});
-    mtdt_fields.append({("#OFFSET"),       (smfile.offset)});
-    mtdt_fields.append({("#SAMPLESTART"),  (smfile.samplestart)});
-    mtdt_fields.append({("#SAMPLELENGTH"), (smfile.samplelength)});
-    mtdt_fields.append({("#BPMS"),         (smfile.bpms)});
-    mtdt_fields.append({("#STOPS"),        (smfile.stops)});
+    mtdt_fields.append((TreeItem){.key=("#TITLE"),        .value=(smfile.title)});
+    mtdt_fields.append((TreeItem){.key=("#MUSIC"),        .value=(smfile.music)});
+    mtdt_fields.append((TreeItem){.key=("#ARTIST"),       .value=(smfile.artist)});
+    mtdt_fields.append((TreeItem){.key=("#OFFSET"),       .value=(smfile.offset)});
+    mtdt_fields.append((TreeItem){.key=("#SAMPLESTART"),  .value=(smfile.samplestart)});
+    mtdt_fields.append((TreeItem){.key=("#SAMPLELENGTH"), .value=(smfile.samplelength)});
+    mtdt_fields.append((TreeItem){.key=("#BPMS"),         .value=(smfile.bpms)});
+    mtdt_fields.append((TreeItem){.key=("#STOPS"),        .value=(smfile.stops)});
     // ...
 
+    // NOTE:
+    // So, there is this unfortunate thing where you have to set your data twice:
+    // once as visual-only strings and second time for actual values that you can edit.
+    //
+    // Alternatively you can have a "model" which mirrors the whole widget tree and look up in there,
+    // but that's a duplication anyway. So, we're going to set each editable item twice.
+    // 
+    // Actually maybe setData() should get pointers to SmFile fields so this redraws correctly.
+    //
+    
     for (auto l : mtdt_fields) {
       auto *key_cell = new Cell(l.key);
       Cell *value_cell;
@@ -393,7 +414,7 @@ public:
       QString value_str;
       if (0) {
       } else if (std::holds_alternative<std::string>(l.value)) { // most fields
-        const std::string &str = std::get<std::string>(l.value);
+        std::string str = std::get<std::string>(l.value);
         value_str = QString::fromStdString(str);
         value_cell = new Cell(value_str);
       } else if (std::holds_alternative<double>(l.value)) { // #OFFSET, #SAMPLESTART, #SAMPLELENGTH
@@ -403,19 +424,22 @@ public:
         value_cell = new Cell(""); // no text on second column
         for (auto timekv : std::get<TimeKVs>(l.value)) {
           auto *time_cell  = new Cell(QString::number(timekv.beat_number));
+          time_cell->setData(timekv.beat_number);
           auto *value_cell = new Cell(QString::number(timekv.value));
+          value_cell->setData(timekv.value);
           key_cell->appendRow({time_cell, value_cell});
         }
       } else {
         assert(false);
       }
-      value_cell->setEditable(false);
       mtdt_cell->appendRow({key_cell, value_cell});
     }
     appendRow(mtdt_cell); // probably the root item?
 
 
     Cell *diff_cell = new Cell("Difficulties");
+    diff_cell->setColumnCount(2);
+
     int diff_i = 0;
     for (auto diff : smfile.diffs) {
       auto *num_cell = new Cell(QString::number(diff_i));
@@ -426,13 +450,21 @@ public:
       auto *ct_n = new Cell("Charter");
       auto *ct_v = new Cell(QString::fromStdString(diff.charter));
       num_cell->appendRow({ct_n, ct_v});
+
       auto *dt_n = new Cell("Diff type");
       auto *dt_v = new Cell(cstr_from_difftype(diff.diff_type));
+      TreeValue injected = diff.diff_type;
+      dt_v->setData(QVariant::fromStdVariant(injected));
+
       QBrush brush(qcolor_from_difftype(diff.diff_type));
       // QFont font; font.setBold(true); t_difftype->setFont(1, font);
       dt_v->setForeground(brush);
-
       num_cell->appendRow({dt_n, dt_v});
+
+      auto *dv_n = new Cell("Diff value");
+      auto *dv_v = new Cell(QString::number(diff.diff_num));
+      dv_v->setData(diff.diff_num);
+      num_cell->appendRow({dv_n, dv_v});
       auto *nr_n = new Cell(u"Note rows (%1)"_s.arg(diff.total_note_rows()));
       num_cell->appendRow(nr_n);
       auto *mrs_n = new Cell(u"Measures (%1)"_s.arg(diff.measures.size()));
@@ -444,7 +476,7 @@ public:
             (QString("%1/%2/%3").arg(nl.measure).arg(nl.beat).arg(nl.smticks))
           );
           QString line_s;
-          for (auto n : nl.notes) { line_s.push_back(static_cast<char>(n)); }
+          for (auto n : nl.notes) { line_s.push_back((char)n); }
           auto *t_noteline_notes = new Cell(line_s);
 
           QColor snap_color = qcolor_from_smticks(nl.smticks);
@@ -468,6 +500,48 @@ public:
       diff_i += 1;
     }
     appendRow(diff_cell);
+  }
+};
+
+struct KVTreeViewDelegate : public QStyledItemDelegate {
+  KVTreeModel *model;
+  KVTreeViewDelegate(KVTreeModel *model) : model(model) {}
+
+  QWidget* createEditor(QWidget* parent, const QStyleOptionViewItem& option, 
+                     const QModelIndex& index) const override {
+
+    (void)option; // for now
+    // note: QStyledItemDelegate::createEditor returns nullptr anyway
+
+    TreeValue val;
+    printf("getting item from index %d\n", index.row());
+    // this can't work, the data is tree-like and the index has just a row ????
+    QStandardItem *item = model->itemFromIndex(index);
+    assert(item);
+    QVariant data = item->data();
+
+    // another non-exhaustive dispatch
+    if (0) {
+    } else if (get_if<DiffType>(&data)) {
+      QComboBox *combo = new QComboBox(parent);
+      for (const char *cs : difftype_cstrs) { combo->addItem(cs); }
+      return combo;
+    } else if (get_if<std::string>(&data)) {
+      auto *lineEdit = new QLineEdit(parent);
+      return lineEdit;
+    } else if (get_if<double>(&data)) {
+      auto *doubleSpinBox = new QDoubleSpinBox(parent);
+      doubleSpinBox->setMaximum(10000);
+      return doubleSpinBox;
+    } else if (get_if<uint32_t>(&data)) {
+      auto *spinBox = new QSpinBox(parent);
+      spinBox->setMaximum(1000000);
+      return spinBox;
+    } else {
+      // assert(false && "non-exhaustive variant");
+      return nullptr; // for now
+    }
+
   }
 };
 
@@ -518,9 +592,12 @@ int main(int argc, char **argv) {
   // diff type with a dropdown. But I would need to scrap all of this
   // and learn idk abstract qt model stuff.
 
-  KVTreeModel smfile_model(smfile);
+  KVTreeModel        smfile_model(smfile);
+  KVTreeViewDelegate smfile_view_delegate(&smfile_model);
+  smfile_view_delegate.model = &smfile_model;
   QTreeView *tree_view = new QTreeView();
   tree_view->setModel(&smfile_model);
+  tree_view->setItemDelegate(&smfile_view_delegate);
   tree_view->setHeaderHidden(true);
   tree_view->expandToDepth(1); // hacky :( but luckily works here
   tree_view->resizeColumnToContents(0);
