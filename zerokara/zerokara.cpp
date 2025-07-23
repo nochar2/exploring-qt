@@ -1,4 +1,3 @@
-#include "qtreewidget.h"
 #include "sm_parser.cpp"
 
 // C++
@@ -8,9 +7,11 @@
 #include <QStandardItemModel>
 #include <sys/inotify.h>
 #include <unistd.h>
+#include <variant>
 
 SmFile smfile;
 
+using namespace Qt::Literals::StringLiterals;
 
 // -- I might want to unify these two maybe ???
 QColor qcolor_from_smticks(double smticks) {
@@ -338,6 +339,139 @@ void *exec_yourself(void *arg) {
   assert(false);
 }
 
+
+// this is messed up :(
+using TimeKVs      = std::vector<TimeKV>;
+using Difficulties = std::vector<Difficulty>;
+
+using TreeValue = std::variant<
+  std::string,
+  double,
+  std::vector<TimeKV>,
+  std::vector<Difficulty>
+>;
+
+// just so I don't have to spam setEditable(false) everywhere
+class Cell : public QStandardItem {
+  public:
+  Cell(QString str) : QStandardItem(str) {
+    this->setEditable(false);
+  };
+};
+
+Q_DECLARE_METATYPE(TreeValue);
+struct TreeItem {
+  QString key;
+  TreeValue value;
+};
+struct KVTreeModel : public QStandardItemModel {
+  Q_OBJECT
+public:
+
+  KVTreeModel(const SmFile &smfile) : QStandardItemModel() {
+    
+    this->setColumnCount(2);
+
+    Cell *mtdt_cell = new Cell("Metadata");
+
+    // HACK: throw all SmFile fields on one temporary pile so the code is shorter.
+    QList<TreeItem> mtdt_fields;
+    mtdt_fields.append({("#TITLE"),        (smfile.title)});
+    mtdt_fields.append({("#MUSIC"),        (smfile.music)});
+    mtdt_fields.append({("#ARTIST"),       (smfile.artist)});
+    mtdt_fields.append({("#OFFSET"),       (smfile.offset)});
+    mtdt_fields.append({("#SAMPLESTART"),  (smfile.samplestart)});
+    mtdt_fields.append({("#SAMPLELENGTH"), (smfile.samplelength)});
+    mtdt_fields.append({("#BPMS"),         (smfile.bpms)});
+    mtdt_fields.append({("#STOPS"),        (smfile.stops)});
+    // ...
+
+    for (auto l : mtdt_fields) {
+      auto *key_cell = new Cell(l.key);
+      Cell *value_cell;
+
+      QString value_str;
+      if (0) {
+      } else if (std::holds_alternative<std::string>(l.value)) { // most fields
+        const std::string &str = std::get<std::string>(l.value);
+        value_str = QString::fromStdString(str);
+        value_cell = new Cell(value_str);
+      } else if (std::holds_alternative<double>(l.value)) { // #OFFSET, #SAMPLESTART, #SAMPLELENGTH
+        value_str = QString::number(std::get<double>(l.value));
+        value_cell = new Cell(value_str);
+      } else if (std::holds_alternative<std::vector<TimeKV>>(l.value)) { // #BPMS, #STOPS
+        value_cell = new Cell(""); // no text on second column
+        for (auto timekv : std::get<TimeKVs>(l.value)) {
+          auto *time_cell  = new Cell(QString::number(timekv.beat_number));
+          auto *value_cell = new Cell(QString::number(timekv.value));
+          key_cell->appendRow({time_cell, value_cell});
+        }
+      } else {
+        assert(false);
+      }
+      value_cell->setEditable(false);
+      mtdt_cell->appendRow({key_cell, value_cell});
+    }
+    appendRow(mtdt_cell); // probably the root item?
+
+
+    Cell *diff_cell = new Cell("Difficulties");
+    int diff_i = 0;
+    for (auto diff : smfile.diffs) {
+      auto *num_cell = new Cell(QString::number(diff_i));
+
+      auto *gt_n = new Cell("Game type");
+      auto *gt_v = new Cell(cstr_from_gametype(diff.game_type));
+      num_cell->appendRow({gt_n, gt_v});
+      auto *ct_n = new Cell("Charter");
+      auto *ct_v = new Cell(QString::fromStdString(diff.charter));
+      num_cell->appendRow({ct_n, ct_v});
+      auto *dt_n = new Cell("Diff type");
+      auto *dt_v = new Cell(cstr_from_difftype(diff.diff_type));
+      QBrush brush(qcolor_from_difftype(diff.diff_type));
+      // QFont font; font.setBold(true); t_difftype->setFont(1, font);
+      dt_v->setForeground(brush);
+
+      num_cell->appendRow({dt_n, dt_v});
+      auto *nr_n = new Cell(u"Note rows (%1)"_s.arg(diff.total_note_rows()));
+      num_cell->appendRow(nr_n);
+      auto *mrs_n = new Cell(u"Measures (%1)"_s.arg(diff.measures.size()));
+      num_cell->appendRow(mrs_n);
+
+      auto draw_note_rows = [](Cell *t_parent, const std::vector<NoteRow>& note_rows) {
+        for (auto nl : note_rows) {
+          auto *t_noteline_snap = new Cell(
+            (QString("%1/%2/%3").arg(nl.measure).arg(nl.beat).arg(nl.smticks))
+          );
+          QString line_s;
+          for (auto n : nl.notes) { line_s.push_back(static_cast<char>(n)); }
+          auto *t_noteline_notes = new Cell(line_s);
+
+          QColor snap_color = qcolor_from_smticks(nl.smticks);
+          snap_color.setAlphaF(.12f); // 0 is fully transparent
+          QBrush brush(snap_color);
+          t_noteline_notes->setBackground(brush);
+          t_parent->appendRow({t_noteline_snap, t_noteline_notes});
+        }
+      };
+      draw_note_rows(nr_n, diff.note_rows());
+      int mr_i = 0;
+      for (auto m : diff.measures) {
+        auto *mr_n = new Cell(u"Measure %1"_s.arg(mr_i));
+        draw_note_rows(mr_n, m.note_rows);
+        mrs_n->appendRow(mr_n);
+
+        mr_i += 1;
+      }
+      
+      diff_cell->appendRow(num_cell);
+      diff_i += 1;
+    }
+    appendRow(diff_cell);
+  }
+};
+
+
 int main(int argc, char **argv) {
   // -- make float parsing not break in Czech locale
   // -- XXX: why does this not work? For now, I'll set it nearby float parsing.
@@ -383,100 +517,107 @@ int main(int argc, char **argv) {
   // -- TODO: at some point, I would like QTreeView, so that I can change
   // diff type with a dropdown. But I would need to scrap all of this
   // and learn idk abstract qt model stuff.
-  QTreeWidget *tree = new QTreeWidget();
-  tree->setColumnCount(2);
-  tree->setHeaderHidden(true);
 
+  KVTreeModel smfile_model(smfile);
+  QTreeView *tree_view = new QTreeView();
+  tree_view->setModel(&smfile_model);
+  tree_view->setHeaderHidden(true);
+  tree_view->expandToDepth(1); // hacky :( but luckily works here
+  tree_view->resizeColumnToContents(0);
+  tree_view->show();
 
-  auto t_meta = new QTreeWidgetItem(tree); {
-    t_meta->setText(0, "Metadata");
-    t_meta->setExpanded(true);
-  }
-  auto t_title = new QTreeWidgetItem(t_meta); {
-    t_title->setText(0, "#TITLE"); t_title->setText(1, QString(smfile.title.c_str()));
-  }
-  auto t_music = new QTreeWidgetItem(t_meta); {
-    t_music->setText(0, "#MUSIC"); t_music->setText(1, QString(smfile.music.c_str()));
-  }
-  auto t_artist = new QTreeWidgetItem(t_meta); {
-    t_artist->setText(0, "#ARTIST"); t_artist->setText(1, QString(smfile.artist.c_str()));
-  }
-  auto t_offset = new QTreeWidgetItem(t_meta); {
-    t_offset->setText(0, "#OFFSET"); t_offset->setText(1, QString::number(smfile.offset));
-  }
-  auto t_samplestart = new QTreeWidgetItem(t_meta); {
-    t_samplestart->setText(0, "#SAMPLESTART"); t_samplestart->setText(1, QString::number(smfile.samplestart));
-  }
-  auto t_samplelength = new QTreeWidgetItem(t_meta); {
-    t_samplelength->setText(0, "#SAMPLELENGTH"); t_samplelength->setText(1, QString::number(smfile.samplelength));
-  }
+  // QTreeWidget *tree = new QTreeWidget();
+  // tree->setColumnCount(2);
+  // tree->setHeaderHidden(true);
+  // auto t_meta = new QTreeWidgetItem(tree); {
+  //   t_meta->setText(0, "Metadata");
+  //   t_meta->setExpanded(true);
+  // }
+  // auto t_title = new QTreeWidgetItem(t_meta); {
+  //   t_title->setText(0, "#TITLE"); t_title->setText(1, QString(smfile.title.c_str()));
+  // }
+  // auto t_music = new QTreeWidgetItem(t_meta); {
+  //   t_music->setText(0, "#MUSIC"); t_music->setText(1, QString(smfile.music.c_str()));
+  // }
+  // auto t_artist = new QTreeWidgetItem(t_meta); {
+  //   t_artist->setText(0, "#ARTIST"); t_artist->setText(1, QString(smfile.artist.c_str()));
+  // }
+  // auto t_offset = new QTreeWidgetItem(t_meta); {
+  //   t_offset->setText(0, "#OFFSET"); t_offset->setText(1, QString::number(smfile.offset));
+  // }
+  // auto t_samplestart = new QTreeWidgetItem(t_meta); {
+  //   t_samplestart->setText(0, "#SAMPLESTART"); t_samplestart->setText(1, QString::number(smfile.samplestart));
+  // }
+  // auto t_samplelength = new QTreeWidgetItem(t_meta); {
+  //   t_samplelength->setText(0, "#SAMPLELENGTH"); t_samplelength->setText(1, QString::number(smfile.samplelength));
+  // }
 
-  QList<QTreeWidgetItem *> t_bpm_list;
-  auto t_bpms = new QTreeWidgetItem(t_meta); {
-    t_bpms->setText(0, "#BPMS"); t_bpms->setExpanded(true);
-    for (auto time_bpm : smfile.bpms) {
-      auto *t_bpm = new QTreeWidgetItem();
-      t_bpm->setText(0, QString::number(time_bpm.beat_number));
-      t_bpm->setText(1, QString::number(time_bpm.value)); // 'g' (default) or 'f', '3'
-      t_bpm_list.push_back(t_bpm);
-    }
-    t_bpms->addChildren(t_bpm_list);
-  }
+  // QList<QTreeWidgetItem *> t_bpm_list;
+  // auto t_bpms = new QTreeWidgetItem(t_meta); {
+  //   t_bpms->setText(0, "#BPMS"); t_bpms->setExpanded(true);
+  //   for (auto time_bpm : smfile.bpms) {
+  //     auto *t_bpm = new QTreeWidgetItem();
+  //     t_bpm->setText(0, QString::number(time_bpm.beat_number));
+  //     t_bpm->setText(1, QString::number(time_bpm.value)); // 'g' (default) or 'f', '3'
+  //     t_bpm_list.push_back(t_bpm);
+  //   }
+  //   t_bpms->addChildren(t_bpm_list);
+  // }
 
-  QList<QTreeWidgetItem *> t_stop_list;
-  auto t_stops = new QTreeWidgetItem(t_meta); {
-    t_stops->setText(0, "#STOPS"); t_stops->setExpanded(true);
-    for (auto time_stop : smfile.stops) {
-      auto *t_stop = new QTreeWidgetItem();
-      t_stop->setText(0, QString::number(time_stop.beat_number));
-      t_stop->setText(1, QString::number(time_stop.value)); // 'g' (default) or 'f', '3'
-      t_stop_list.push_back(t_stop);
-    }
-    t_bpms->addChildren(t_stop_list);
-  }
+  // QList<QTreeWidgetItem *> t_stop_list;
+  // auto t_stops = new QTreeWidgetItem(t_meta); {
+  //   t_stops->setText(0, "#STOPS"); t_stops->setExpanded(true);
+  //   for (auto time_stop : smfile.stops) {
+  //     auto *t_stop = new QTreeWidgetItem();
+  //     t_stop->setText(0, QString::number(time_stop.beat_number));
+  //     t_stop->setText(1, QString::number(time_stop.value)); // 'g' (default) or 'f', '3'
+  //     t_stop_list.push_back(t_stop);
+  //   }
+  //   t_bpms->addChildren(t_stop_list);
+  // }
   
-  auto t_diffs = new QTreeWidgetItem(tree);
-  t_diffs->setText(0, "Difficulties"); t_diffs->setExpanded(true);
+  // auto t_diffs = new QTreeWidgetItem(tree);
+  // t_diffs->setText(0, "Difficulties"); t_diffs->setExpanded(true);
 
-  size_t i = 0;
-  for (auto diff : smfile.diffs) {
-    auto *t_diff = new QTreeWidgetItem(t_diffs);
-    t_diff->setText(0, QString::number(i));
-    t_diff->setExpanded(true);
+  // size_t i = 0;
+  // for (auto diff : smfile.diffs) {
+  //   auto *t_diff = new QTreeWidgetItem(t_diffs);
+  //   t_diff->setText(0, QString::number(i));
+  //   t_diff->setExpanded(true);
 
-    auto *t_gametype = new QTreeWidgetItem(t_diff);
-    t_gametype->setText(0, "Game type");
-    t_gametype->setText(1, cstr_from_gametype(diff.game_type));
+  //   auto *t_gametype = new QTreeWidgetItem(t_diff);
+  //   t_gametype->setText(0, "Game type");
+  //   t_gametype->setText(1, cstr_from_gametype(diff.game_type));
 
-    auto *t_charter = new QTreeWidgetItem(t_diff);
-    t_charter->setText(0, "Charter");
-    t_charter->setText(1, diff.charter.c_str());
+  //   auto *t_charter = new QTreeWidgetItem(t_diff);
+  //   t_charter->setText(0, "Charter");
+  //   t_charter->setText(1, diff.charter.c_str());
 
-    auto *t_difftype = new QTreeWidgetItem(t_diff);
-    t_difftype->setText(0, "Diff type");
-    t_difftype->setText(1, cstr_from_difftype(diff.diff_type));
-    QBrush brush(qcolor_from_difftype(diff.diff_type));
-    // QFont font; font.setBold(true); t_difftype->setFont(1, font);
-    t_difftype->setForeground(1, brush);
+  //   auto *t_difftype = new QTreeWidgetItem(t_diff);
+  //   t_difftype->setText(0, "Diff type");
+  //   t_difftype->setText(1, cstr_from_difftype(diff.diff_type));
+  //   QBrush brush(qcolor_from_difftype(diff.diff_type));
+  //   // QFont font; font.setBold(true); t_difftype->setFont(1, font);
+  //   t_difftype->setForeground(1, brush);
 
-    auto *t_diffval = new QTreeWidgetItem(t_diff);
-    t_diffval->setText(0, "Diff value");
-    t_diffval->setText(1, QString::number(diff.diff_num));
+  //   auto *t_diffval = new QTreeWidgetItem(t_diff);
+  //   t_diffval->setText(0, "Diff value");
+  //   t_diffval->setText(1, QString::number(diff.diff_num));
 
-    auto *t_notes = new QTreeWidgetItem(t_diff);
-    t_notes->setText(0, QString("Note rows (%1)").arg(diff.total_note_rows()));
+  //   auto *t_notes = new QTreeWidgetItem(t_diff);
+  //   t_notes->setText(0, QString("Note rows (%1)").arg(diff.total_note_rows()));
 
-    auto *t_as_measures = new QTreeWidgetItem(t_diff);
-    t_as_measures->setText(0, QString("Measures (%1)").arg(diff.measures.size()));
+  //   auto *t_as_measures = new QTreeWidgetItem(t_diff);
+  //   t_as_measures->setText(0, QString("Measures (%1)").arg(diff.measures.size()));
 
-    auto draw_note_rows = [](QTreeWidgetItem *t_parent, std::vector<NoteRow> const& note_rows) {
-      for (auto nl : note_rows) {
-        auto *t_noteline = new QTreeWidgetItem(t_parent);
-        t_noteline->setText(0, QString("%1/%2/%3")
-                            .arg(nl.measure).arg(nl.beat).arg(nl.smticks));
-        QString line_s;
-        for (auto n : nl.notes) { line_s.push_back(static_cast<char>(n)); }
-        t_noteline->setText(1, line_s);
+  //   auto draw_note_rows = [](QTreeWidgetItem *t_parent, std::vector<NoteRow> const& note_rows) {
+  //     for (auto nl : note_rows) {
+  //       auto *t_noteline = new QTreeWidgetItem(t_parent);
+  //       t_noteline->setText(0, QString("%1/%2/%3")
+  //                           .arg(nl.measure).arg(nl.beat).arg(nl.smticks));
+  //       QString line_s;
+  //       for (auto n : nl.notes) { line_s.push_back(static_cast<char>(n)); }
+  //       t_noteline->setText(1, line_s);
         // -- stupid:
         // -- * there is no verification
         // -- * not per-column
@@ -484,30 +625,30 @@ int main(int argc, char **argv) {
         // -- * it's not ergonomic anyway so ?????
         // t_noteline->setFlags(t_noteline->flags() | Qt::ItemIsEditable);
 
-        QColor snap_color = qcolor_from_smticks(nl.smticks);
-        snap_color.setAlphaF(.12f); // 0 is fully transparent
-        QBrush brush(snap_color);
-        t_noteline->setBackground(1, brush);
-      }
-    };
+  //       QColor snap_color = qcolor_from_smticks(nl.smticks);
+  //       snap_color.setAlphaF(.12f); // 0 is fully transparent
+  //       QBrush brush(snap_color);
+  //       t_noteline->setBackground(1, brush);
+  //     }
+  //   };
 
-    int measure_i = 0;
-    for (auto m : diff.measures) {
-      auto *t_measure = new QTreeWidgetItem(t_as_measures);
-      t_measure->setText(0, QString("%1 (%2 row%3)")
-                         .arg(measure_i)
-                         .arg(m.note_rows.size())
-                         .arg(m.note_rows.size() == 1 ? "" : "s")
-      );
-      draw_note_rows(t_measure, m.note_rows);
-      measure_i += 1;
-    }
-    draw_note_rows(t_notes, diff.note_rows());
+  //   int measure_i = 0;
+  //   for (auto m : diff.measures) {
+  //     auto *t_measure = new QTreeWidgetItem(t_as_measures);
+  //     t_measure->setText(0, QString("%1 (%2 row%3)")
+  //                        .arg(measure_i)
+  //                        .arg(m.note_rows.size())
+  //                        .arg(m.note_rows.size() == 1 ? "" : "s")
+  //     );
+  //     draw_note_rows(t_measure, m.note_rows);
+  //     measure_i += 1;
+  //   }
+  //   draw_note_rows(t_notes, diff.note_rows());
 
-    i++;
-  }
+  //   i++;
+  // }
   // tree->expandAll();
-  tree->resizeColumnToContents(0);
+  // tree->resizeColumnToContents(0);
 
 
 
@@ -521,8 +662,8 @@ int main(int argc, char **argv) {
   // layout_.addLayout(&resizable_layout);
   
   // layout.addWidget(&tree, 5);
-  resizable_layout.addWidget(tree);
   // resizable_layout.addWidget(tree);
+  resizable_layout.addWidget(tree_view);
 
   // QTextEdit viewer;
   // viewer.setReadOnly(true);
@@ -635,8 +776,8 @@ int main(int argc, char **argv) {
 
   w_tabs_root.show();
   int ret = app.exec();
-  delete tree;
-  tree = nullptr;
+  // delete tree;
+  // tree = nullptr;
   return ret;
 }
 
