@@ -371,7 +371,7 @@ smfile_from_string_opt(string const& str)
               }};
               // I don't know beat / ticks / seconds because I don't know the pattern count per measure yet
               // std::println(stderr, "pushing back a line {}", line_s);
-              current_measure_pre.push_back((NoteRow){ .measure=measure_i, .beat=0, .smticks=0, .sec_zero_offset=0, .line=line });
+              current_measure_pre.push_back((NoteRow){ .measure=measure_i, .beat=0, .smticks=0, .sec_zero_offset=0, .notes=line });
               break;
             }
             default:
@@ -411,7 +411,7 @@ smfile_from_string_opt(string const& str)
           // auto begin
           Measure m;
           for (auto nl : current_measure_pre) {
-            if (!std::all_of(nl.line.begin(), nl.line.end(), [](auto x){return x == NoteType::None;})) {
+            if (!std::all_of(nl.notes.begin(), nl.notes.end(), [](auto x){return x == NoteType::None;})) {
               nl.beat    = (uint8_t)((i * beats_per_measure * 48 / pats_per_measure) / 48);
               nl.smticks = (uint8_t)((i * beats_per_measure * 48 / pats_per_measure) % 48);
               nl.sec_zero_offset = secs_per_beat * (nl.beat + nl.smticks / 48.);

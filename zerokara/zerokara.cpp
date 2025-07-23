@@ -5,11 +5,12 @@
 #include "precompiled.h"
 #include <QSplitter>
 #include <QTabWidget>
-#include <sys/inotify.h>
+#include <QStandardItemModel>
 #include <sys/inotify.h>
 #include <unistd.h>
 
 SmFile smfile;
+
 
 // -- I might want to unify these two maybe ???
 QColor qcolor_from_smticks(double smticks) {
@@ -257,10 +258,13 @@ public:
         // -- 28th colored streams for example.
         // QColor color = qcolor_from_smticks((int32_t)roundl(s->smticks));
         QColor color = qcolor_from_smticks(s->smticks);
+        color.setAlphaF(.6f);
         pen.setColor(color);
         pen.setWidth(
-          std::fmod(s->smticks, 48.) == 0 ? 3 :
-          std::fmod(s->smticks, 24.) == 0 ? 2 : 1
+          std::fmod(s->smticks, 48.) == 0 ? 4 :
+          std::fmod(s->smticks, 24.) == 0 ? 3 :
+          std::fmod(s->smticks, 16.) == 0 ? 2 :
+          std::fmod(s->smticks, 12.) == 0 ? 2 : 1
          );
         painter.setPen(pen);
         auto snap_line = QLineF(left_start, y, left_start + 4 * note_width, y);
@@ -282,7 +286,7 @@ public:
       };
 
       for (size_t i = 0; i < 4; i++) {
-        if (row.line[i] == NoteType::Tap) {
+        if (row.notes[i] == NoteType::Tap) {
           line.rects.push_back(
             QRect((int32_t)(left_start + note_width * (int32_t)i),
                   (int32_t)(px_of_measure_zero + px_per_smtick() * global_smticks),
@@ -336,12 +340,11 @@ void *exec_yourself(void *arg) {
 
 int main(int argc, char **argv) {
   // -- make float parsing not break in Czech locale
-  // -- XXX: why does this not work? For now, setting it
-  // -- nearby float parsing.
+  // -- XXX: why does this not work? For now, I'll set it nearby float parsing.
   // QLocale locale("C");
   // QLocale::setDefault(locale);
 
-  // let's try the hot restart thing.
+  // -- let's try the hot restart thing.
   int inotify_fd = inotify_init1(IN_CLOEXEC);
   inotify_add_watch(inotify_fd, argv[0], IN_ATTRIB);
   pthread_t inotify_reader;
@@ -350,31 +353,22 @@ int main(int argc, char **argv) {
   // -- QGuiApplication doesn't work if you want widgets
   QApplication app(argc, argv);
 
-  // -- this alone works
-  // QFrame frame; frame.show();
-  // -- even this alone works
-  // QRadioButton button; button.show();
-  // -- this shows running thing on taskbar but there is no window
-  // QWindow win; win.show();
-
-
-  // parse the smfile
-  
+  // -- parse a sample smfile
   const char *path = "ext/Shannon's Theorem.sm";
   std::ifstream file(path);
   std::ostringstream ss;
   ss << file.rdbuf();
   auto smfile_opt = smfile_from_string_opt(ss.str());
 
-  if (!std::holds_alternative<SmFile>(smfile_opt)) {
+  if (std::holds_alternative<SmFile>(smfile_opt)) {
+    smfile = std::get<SmFile>(smfile_opt);
+  } else {
     auto err = std::get<SmParseError>(smfile_opt);
     printf("%s\n", err.msg.c_str());
     assert(false);
   }
 
-  smfile = std::get<SmFile>(smfile_opt);
-
-
+  // -- build UI
   QWidget *w_root = new QWidget();
 
   QTabWidget w_tabs_root;
@@ -386,9 +380,13 @@ int main(int argc, char **argv) {
   QSplitter resizable_layout(Qt::Horizontal);
   layout_.addWidget(&resizable_layout);
 
+  // -- TODO: at some point, I would like QTreeView, so that I can change
+  // diff type with a dropdown. But I would need to scrap all of this
+  // and learn idk abstract qt model stuff.
   QTreeWidget *tree = new QTreeWidget();
   tree->setColumnCount(2);
   tree->setHeaderHidden(true);
+
 
   auto t_meta = new QTreeWidgetItem(tree); {
     t_meta->setText(0, "Metadata");
@@ -470,25 +468,30 @@ int main(int argc, char **argv) {
 
     auto *t_as_measures = new QTreeWidgetItem(t_diff);
     t_as_measures->setText(0, QString("Measures (%1)").arg(diff.measures.size()));
-    int measure_i = 0;
 
-    auto draw_note_rows = [&](QTreeWidgetItem *t_parent, std::vector<NoteRow> const& note_rows) {
+    auto draw_note_rows = [](QTreeWidgetItem *t_parent, std::vector<NoteRow> const& note_rows) {
       for (auto nl : note_rows) {
         auto *t_noteline = new QTreeWidgetItem(t_parent);
         t_noteline->setText(0, QString("%1/%2/%3")
                             .arg(nl.measure).arg(nl.beat).arg(nl.smticks));
         QString line_s;
-        for (auto n : nl.line) { line_s.push_back(static_cast<char>(n)); }
+        for (auto n : nl.notes) { line_s.push_back(static_cast<char>(n)); }
         t_noteline->setText(1, line_s);
+        // -- stupid:
+        // -- * there is no verification
+        // -- * not per-column
+        // -- * I want to actually double-click to seek to that pos
+        // -- * it's not ergonomic anyway so ?????
+        // t_noteline->setFlags(t_noteline->flags() | Qt::ItemIsEditable);
 
         QColor snap_color = qcolor_from_smticks(nl.smticks);
-        snap_color.setAlpha(30); // 0 is fully transparent
+        snap_color.setAlphaF(.12f); // 0 is fully transparent
         QBrush brush(snap_color);
         t_noteline->setBackground(1, brush);
       }
-      measure_i += 1;
     };
 
+    int measure_i = 0;
     for (auto m : diff.measures) {
       auto *t_measure = new QTreeWidgetItem(t_as_measures);
       t_measure->setText(0, QString("%1 (%2 row%3)")
@@ -497,6 +500,7 @@ int main(int argc, char **argv) {
                          .arg(m.note_rows.size() == 1 ? "" : "s")
       );
       draw_note_rows(t_measure, m.note_rows);
+      measure_i += 1;
     }
     draw_note_rows(t_notes, diff.note_rows());
 
