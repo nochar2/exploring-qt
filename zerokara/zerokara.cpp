@@ -510,11 +510,12 @@ struct KVTreeViewDelegate : public QStyledItemDelegate {
   QWidget* createEditor(QWidget* parent, const QStyleOptionViewItem& option, 
                      const QModelIndex& index) const override {
 
+
     (void)option; // for now
     // note: QStyledItemDelegate::createEditor returns nullptr anyway
 
     TreeValue val;
-    printf("getting item from index %d\n", index.row());
+    printf("createEditor called | getting item from index %d\n", index.row());
     // this can't work, the data is tree-like and the index has just a row ????
     QStandardItem *item = model->itemFromIndex(index);
     assert(item);
@@ -531,11 +532,13 @@ struct KVTreeViewDelegate : public QStyledItemDelegate {
       return lineEdit;
     } else if (get_if<double>(&data)) {
       auto *doubleSpinBox = new QDoubleSpinBox(parent);
+      // -- this depends
       doubleSpinBox->setMaximum(10000);
       return doubleSpinBox;
     } else if (get_if<uint32_t>(&data)) {
       auto *spinBox = new QSpinBox(parent);
-      spinBox->setMaximum(1000000);
+      // -- TODO set this to whatever Etterna supports as maximum
+      spinBox->setMaximum(UINT32_MAX);
       return spinBox;
     } else {
       // assert(false && "non-exhaustive variant");
