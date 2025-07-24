@@ -1,5 +1,3 @@
-// #include "sm_parser.cpp"
-
 #include <fstream>
 #include <string>
 using std::string;
@@ -10,6 +8,8 @@ using std::string;
 
 #include "sm_parser.h"
 #include "qt_includes.h"
+
+#include "dumb_stdlib_linux.h"
 
 
 void __please(){suppress_the_spurious_include_warning=0;};
@@ -334,9 +334,9 @@ public:
 
 
     // might be very slow for now
-    std::vector<NoteRow> note_rows = smfile.diffs[0].note_rows();
+    Vector<NoteRow> note_rows = smfile.diffs[0].note_rows();
 
-    std::vector<NoteRowRects> rectangles;
+    Vector<NoteRowRects> rectangles;
     std::transform(note_rows.begin(), note_rows.end(), std::back_inserter(rectangles), [&](NoteRow nr) {return rectangles_at_smtick_pos(nr);});
 
     QRectF cont_rect = this->contentsRect();
@@ -530,7 +530,7 @@ public:
         auto *measures_n = new Cell(u"Measures (%1)"_s.arg(diff.measures.size()));
         num_cell->appendRow(measures_n);
 
-        auto draw_note_rows = [](Cell *t_parent, const std::vector<NoteRow>& note_rows) {
+        auto draw_note_rows = [](Cell *t_parent, const Vector<NoteRow>& note_rows) {
           for (auto &nl : note_rows) {
             auto *t_noteline_snap = new Cell(
               u"%1/%2/<span style='color: %4; font-weight: 600;'>%3</span>"_s

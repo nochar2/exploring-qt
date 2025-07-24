@@ -1,0 +1,16 @@
+*
+!.gitignore
+!*/
+!*.cpp
+# I have seen moc_predefs.h somewhere that we might want to ignore, idk
+!*.h
+# !precompiled.h
+# !qt_includes.h
+# !stl_includes.h
+# !sm_parser.h
+# !dumb_stdlib_linux.h
+!*.pro
+!*.txt
+!shell.nix
+!README.md
+!Shannon's Theorem.sm

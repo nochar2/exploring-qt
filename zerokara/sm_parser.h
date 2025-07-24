@@ -2,9 +2,10 @@
 #define SM_PARSER_H
 #include <string>
 #include <cstdint>
-#include <array>
-#include <vector>
+// #include <array>
+// #include <vector>
 #include <variant>
+#include "dumb_stdlib_linux.h"
 
 extern const std::string CHART;
 
@@ -40,11 +41,11 @@ struct NoteRow {
   uint32_t smticks; // 0..47
   // actually, idk if this should be with offset or without
   double sec_zero_offset;
-  std::array<NoteType, 4> notes;
+  Array<NoteType, 4> notes;
 };
 
 struct Measure {
-  std::vector<NoteRow> note_rows;
+  Vector<NoteRow> note_rows;
 };
 
 struct Difficulty {
@@ -52,9 +53,9 @@ struct Difficulty {
   std::string charter;
   DiffType diff_type;
   uint32_t diff_num;
-  std::vector<double> groove_values;
-  std::vector<Measure> measures;
-  std::vector<NoteRow> note_rows();
+  Vector<double> groove_values;
+  Vector<Measure> measures;
+  Vector<NoteRow> note_rows();
   size_t total_note_rows();
 };
 
@@ -76,9 +77,9 @@ struct SmFile {
   double samplestart;
   double samplelength;
 
-  std::vector<TimeKV> bpms;
-  std::vector<TimeKV> stops;
-  std::vector<Difficulty> diffs;
+  Vector<TimeKV> bpms;
+  Vector<TimeKV> stops;
+  Vector<Difficulty> diffs;
 };
 
 enum class SmField {
@@ -96,6 +97,6 @@ smfile_from_string_opt(std::string const& str);
 
 const char *cstr_from_gametype(GameType gt);
 const char *cstr_from_difftype(DiffType gt);
-extern std::vector<const char *> difftype_cstrs;
+extern Array<const char *, 6> difftype_cstrs;
 
 #endif

@@ -2,16 +2,16 @@
 #include <cassert>
 // -- <chrono> includes std::any_of and format, but not whole <algorithm> because
 // -- that one is 7k extra lines with -E. Curious.
-// #include <chrono>
-#include "dumb_chrono.cpp"
 #include <format>
 #include <ranges>
 
-using std::array;
+// using std::array;
+// using std::vector;
 using std::string;
 using std::string_view;
-using std::vector;
 using namespace std::string_literals;
+
+using Chrono::TimePoint;
 
 #define eprintf(...) fprintf(stderr, __VA_ARGS__)
 
@@ -25,8 +25,8 @@ size_t Difficulty::total_note_rows() {
   return n;
 }
 // naive and slow, but let's do it for now
-std::vector<NoteRow> Difficulty::note_rows() {
-  std::vector<NoteRow> ret;
+Vector<NoteRow> Difficulty::note_rows() {
+  Vector<NoteRow> ret;
   for (auto m : this->measures) {
     for (auto nl : m.note_rows) {
       ret.push_back(nl);
@@ -51,7 +51,7 @@ bool smfile_key_is_double_type(string_view sv) {
                      [&](auto k){return k == sv;});
 }
 
-std::vector<const char *> difftype_cstrs = {
+Array<const char *, 6> difftype_cstrs = {
   {"Beginner", "Easy", "Medium", "Hard", "Challenge", "Edit"}
 };
 
@@ -122,7 +122,7 @@ smfile_from_string_opt(string const& str)
 
   SmFile smfile {};
   // auto tb = std::chrono::system_clock::now();
-  auto tb = Chrono::now();
+  auto tb = Chrono::system_clock::now();
 
   /* let's use the C api instead */
 
@@ -137,8 +137,8 @@ smfile_from_string_opt(string const& str)
 
       // auto te = std::chrono::system_clock::now();
       // auto us = std::chrono::duration_cast<std::chrono::microseconds>(te-tb).count();
-      auto te = Chrono::now();
-      auto us = (te-tb).microseconds();
+      TimePoint te = Chrono::system_clock::now();
+      auto us = Chrono::duration_cast<Chrono::microseconds>(te-tb).count();
       
       // std::print(stderr, "Parsed an SmFile in {} seconds", (double)us / 1000000.);
       eprintf("Parsed an SmFile in %lf seconds", (double)us / 1000000.);
@@ -202,7 +202,7 @@ smfile_from_string_opt(string const& str)
     } else if (key == "BPMS" || key == "STOPS") {
       string_view timevals_sv = sv.substr(0, semi_pos);
 
-      std::vector<TimeKV> timevals;
+      Vector<TimeKV> timevals;
       for (auto kv_s : timevals_sv | std::views::split(',')) {
         double time, val;
         int matched = sscanf(kv_s.data(), " %lf=%lf", &time, &val);
@@ -290,7 +290,7 @@ smfile_from_string_opt(string const& str)
         if (sentinel_pos == string::npos) {return (SmParseError){.msg="While reading #NOTES/GrooveValues: EOF"s};}
 
         string_view groove_values_s = sv.substr(0, sentinel_pos);
-        std::vector<double> gvs;
+        Vector<double> gvs;
         for (auto gvr : groove_values_s | std::views::split(':')) {
           double gv;
           auto err = std::from_chars(gvr.begin(), gvr.end(), gv);
@@ -324,7 +324,7 @@ smfile_from_string_opt(string const& str)
 
         bool end_of_difficulty = false;
         while (!end_of_difficulty) { // for each measure
-          std::vector<NoteRow> current_measure_pre = {};
+          Vector<NoteRow> current_measure_pre = {};
 
           bool end_of_measure = false;
           while (!end_of_measure) { // for each pattern
@@ -358,7 +358,7 @@ smfile_from_string_opt(string const& str)
                   )
                 };
               }
-              array<NoteType,4> line = {{
+              Array<NoteType,4> line = {{
                 static_cast<NoteType>(line_s[0]),
                 static_cast<NoteType>(line_s[1]),
                 static_cast<NoteType>(line_s[2]),
@@ -387,7 +387,7 @@ smfile_from_string_opt(string const& str)
           assert(pats_per_measure != 0); // for now
 
           auto b = beats_per_measure;
-          array<size_t, 10> common_ppm = {b, 2*b, 3*b, 4*b, 6*b, 8*b, 12*b, 16*b, 24*b, 48*b};
+          Array<size_t, 10> common_ppm = {b, 2*b, 3*b, 4*b, 6*b, 8*b, 12*b, 16*b, 24*b, 48*b};
           if (pats_per_measure % b != 0) {
             // return (SmParseError){.msg=std::format(
               eprintf("W: While reading #Notes/NoteRows: Measure %u has number of rows %u, which is not divisible by time signature %u/4.\n",
@@ -406,7 +406,10 @@ smfile_from_string_opt(string const& str)
           // auto begin
           Measure m;
           for (auto nl : current_measure_pre) {
-            if (!std::all_of(nl.notes.begin(), nl.notes.end(), [](auto x){return x == NoteType::None;})) {
+            if (!std::all_of(nl.notes.begin(),
+                             nl.notes.end(),
+                             [](auto x){return x == NoteType::None;}))
+            {
               nl.beat    = (uint8_t)((i * beats_per_measure * 48 / pats_per_measure) / 48);
               nl.smticks = (uint8_t)((i * beats_per_measure * 48 / pats_per_measure) % 48);
               nl.sec_zero_offset = secs_per_beat * (nl.beat + nl.smticks / 48.);
