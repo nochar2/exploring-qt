@@ -725,29 +725,21 @@ int main(int argc, char **argv) {
       preview_controls.addWidget(&cmod_value, 1);
       preview_controls.setAlignment(&cmod_value, Qt::AlignCenter);      
 
-      // -- TODO: This should be a QSpinBox
-      QSlider cmod_slider(Qt::Vertical, nullptr);
-        cmod_slider.setMinimum(300);
-        cmod_slider.setMaximum(1000);
-        cmod_slider.setValue(700);
-        cmod_slider.setPageStep(200);
-        cmod_slider.setSingleStep(15);
+      QSpinBox cmod_spinbox;
+        cmod_spinbox.setMinimum(50);
+        cmod_spinbox.setMaximum(1000);
+        cmod_spinbox.setValue(700);
+        cmod_spinbox.setSingleStep(15);
         QObject::connect(
-          &cmod_slider,
-          &QSlider::valueChanged,
+          &cmod_spinbox,
+          &QSpinBox::valueChanged,
           &preview_actual,
           &NoteDisplayWidget::onCmodChange
         );
-        QObject::connect(
-          &cmod_slider,
-          &QSlider::valueChanged,
-          &cmod_value,
-          [&](int value){ cmod_value.setText(QString("CMOD: \n%1").arg(value)); }
-        );
-        cmod_value.setText(QString("CMOD: \n%1").arg(cmod_slider.value())); // set initial
-        preview_actual.onCmodChange(cmod_slider.value());
-      preview_controls.addWidget(&cmod_slider, 1);
-      preview_controls.setAlignment(&cmod_slider, Qt::AlignCenter);
+        cmod_value.setText("CMOD");
+        preview_actual.onCmodChange(cmod_spinbox.value());
+      preview_controls.addWidget(&cmod_spinbox, 1);
+      preview_controls.setAlignment(&cmod_spinbox, Qt::AlignCenter);
     preview_tile.addLayout(&preview_controls, 1);
 
   resizable_layout.addWidget(&right_chunk);
