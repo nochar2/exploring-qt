@@ -1,5 +1,9 @@
 #include "sm_parser.h"
-#include "precompiled.h"
+#include <algorithm>
+#include <cassert>
+#include <chrono>
+#include <ranges>
+#include <QColor>
 
 using std::array;
 using std::string;

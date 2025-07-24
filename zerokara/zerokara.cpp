@@ -1,17 +1,15 @@
 #include "sm_parser.cpp"
 
-// C++
-#include "precompiled.h"
-#include <QSplitter>
-#include <QTabWidget>
-#include <QStandardItemModel>
-#include <QStyledItemDelegate>
+#include "qt_includes.h"
+void __please(){suppress_the_spurious_include_warning=0;};
+
+
+#include <fstream>
+
+// reload hacks
 #include <sys/inotify.h>
 #include <unistd.h>
-#include <variant>
-#include <QComboBox>
-#include <QLineEdit>
-#include <QSpinBox>
+
 
 SmFile smfile;
 
@@ -586,7 +584,7 @@ struct KVTreeViewDelegate : public QStyledItemDelegate {
     painter->restore();
   }
 
-  QWidget* createEditor(QWidget* parent, const QStyleOptionViewItem& option, 
+  QWidget* createEditor(QWidget* parent, const QStyleOptionViewItem& /*option*/, 
                      const QModelIndex& index) const override {
 
 
@@ -746,7 +744,10 @@ int main(int argc, char **argv) {
     QObject::connect(
       &preview_actual,
       &NoteDisplayWidget::positionChanged,
-      redraw_statusbar
+      [&](SmRelativePos pos, int snap){
+        redraw_statusbar(pos, snap);
+        preview_actual.update();
+      }
     );
 
     QObject::connect(
@@ -763,19 +764,20 @@ int main(int argc, char **argv) {
         // ew! but works for now
         TreeValue row_var = *(TreeValue *)qvar.data();
         if (0) {
-        } else if (std::holds_alternative<NoteRow>(row_var)) {
+        } else if (std::holds_alternative<NoteRow>(row_var)) { // clicked on a noterow
           NoteRow row = std::get<NoteRow>(row_var);
           // NOTE: maybe put SmRelativePos into the sm_parser already
           SmRelativePos new_pos = {(int32_t)row.measure, (int32_t)row.beat, (double)row.smticks};
 
           // XXX: this really shouldn't be three statements like this
           preview_actual.cur_chart_pos = new_pos;
-          preview_actual.update();
+          // preview_actual.update();
           emit preview_actual.positionChanged(new_pos, preview_actual.current_snap_nths);
-        } else if (std::holds_alternative<SmRelativePos>(row_var)) {
+        } else if (std::holds_alternative<SmRelativePos>(row_var)) { // clicked on a measure
           auto new_pos = std::get<SmRelativePos>(row_var);
           preview_actual.cur_chart_pos = new_pos;
-          preview_actual.update();
+          // preview_actual.update();
+          emit preview_actual.positionChanged(new_pos, preview_actual.current_snap_nths);
         }
       }
     );

@@ -11,17 +11,18 @@
 
 CONFIG = qt import_qpa_plugin \
 	c++20 warn_on rtti_off exceptions_off \
-	debug precompile_header force_debug_info 
-### -fno-exceptions just disables try ... catch, not actual exceptions
-### CONFIG -= exceptions
+	debug force_debug_info 
+	# precompile_header
+# PRECOMPILED_HEADER = precompiled.h
 
-QMAKE_CXXFLAGS_DEBUG += -Wconversion
+QMAKE_CXXFLAGS_DEBUG += -Wconversion -fno-unused-includes
 
-
-### (kind of implies `core gui` somehow)
-QT = widgets
+QT = widgets                  # (kind of implies `core gui` somehow)
 
 TARGET = zerokara
 SOURCES = zerokara.cpp
 
-PRECOMPILED_HEADER = precompiled.h
+
+###### dumb shit
+### -fno-exceptions just disables try ... catch, not actual exceptions
+### CONFIG -= exceptions
