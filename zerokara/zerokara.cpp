@@ -757,6 +757,7 @@ int main(int argc, char **argv) {
       // to actual pos. Tell NoteDisplayWidget to seek to that pos and
       // refresh itself.
       [&](const QModelIndex &index){
+        if (!index.isValid()) return;
         QStandardItem *qitem = smfile_model.itemFromIndex(index);
         QVariant qvar = qitem->data();
         // ew! but works for now
