@@ -507,7 +507,7 @@ public:
         auto draw_note_rows = [](Cell *t_parent, const std::vector<NoteRow>& note_rows) {
           for (auto nl : note_rows) {
             auto *t_noteline_snap = new Cell(
-              (QString("%1/%2/%3").arg(nl.measure).arg(nl.beat).arg(nl.smticks))
+              (u"%1/%2/%3"_s.arg(nl.measure).arg(nl.beat).arg(nl.smticks))
             );
             QString line_s;
             for (auto n : nl.notes) { line_s.push_back((char)n); }
@@ -669,151 +669,7 @@ int main(int argc, char **argv) {
   tree_view->expandToDepth(1); // hacky :( but luckily works here
   tree_view->resizeColumnToContents(0);
   tree_view->show();
-
-  // QTreeWidget *tree = new QTreeWidget();
-  // tree->setColumnCount(2);
-  // tree->setHeaderHidden(true);
-  // auto t_meta = new QTreeWidgetItem(tree); {
-  //   t_meta->setText(0, "Metadata");
-  //   t_meta->setExpanded(true);
-  // }
-  // auto t_title = new QTreeWidgetItem(t_meta); {
-  //   t_title->setText(0, "#TITLE"); t_title->setText(1, QString(smfile.title.c_str()));
-  // }
-  // auto t_music = new QTreeWidgetItem(t_meta); {
-  //   t_music->setText(0, "#MUSIC"); t_music->setText(1, QString(smfile.music.c_str()));
-  // }
-  // auto t_artist = new QTreeWidgetItem(t_meta); {
-  //   t_artist->setText(0, "#ARTIST"); t_artist->setText(1, QString(smfile.artist.c_str()));
-  // }
-  // auto t_offset = new QTreeWidgetItem(t_meta); {
-  //   t_offset->setText(0, "#OFFSET"); t_offset->setText(1, QString::number(smfile.offset));
-  // }
-  // auto t_samplestart = new QTreeWidgetItem(t_meta); {
-  //   t_samplestart->setText(0, "#SAMPLESTART"); t_samplestart->setText(1, QString::number(smfile.samplestart));
-  // }
-  // auto t_samplelength = new QTreeWidgetItem(t_meta); {
-  //   t_samplelength->setText(0, "#SAMPLELENGTH"); t_samplelength->setText(1, QString::number(smfile.samplelength));
-  // }
-
-  // QList<QTreeWidgetItem *> t_bpm_list;
-  // auto t_bpms = new QTreeWidgetItem(t_meta); {
-  //   t_bpms->setText(0, "#BPMS"); t_bpms->setExpanded(true);
-  //   for (auto time_bpm : smfile.bpms) {
-  //     auto *t_bpm = new QTreeWidgetItem();
-  //     t_bpm->setText(0, QString::number(time_bpm.beat_number));
-  //     t_bpm->setText(1, QString::number(time_bpm.value)); // 'g' (default) or 'f', '3'
-  //     t_bpm_list.push_back(t_bpm);
-  //   }
-  //   t_bpms->addChildren(t_bpm_list);
-  // }
-
-  // QList<QTreeWidgetItem *> t_stop_list;
-  // auto t_stops = new QTreeWidgetItem(t_meta); {
-  //   t_stops->setText(0, "#STOPS"); t_stops->setExpanded(true);
-  //   for (auto time_stop : smfile.stops) {
-  //     auto *t_stop = new QTreeWidgetItem();
-  //     t_stop->setText(0, QString::number(time_stop.beat_number));
-  //     t_stop->setText(1, QString::number(time_stop.value)); // 'g' (default) or 'f', '3'
-  //     t_stop_list.push_back(t_stop);
-  //   }
-  //   t_bpms->addChildren(t_stop_list);
-  // }
-  
-  // auto t_diffs = new QTreeWidgetItem(tree);
-  // t_diffs->setText(0, "Difficulties"); t_diffs->setExpanded(true);
-
-  // size_t i = 0;
-  // for (auto diff : smfile.diffs) {
-  //   auto *t_diff = new QTreeWidgetItem(t_diffs);
-  //   t_diff->setText(0, QString::number(i));
-  //   t_diff->setExpanded(true);
-
-  //   auto *t_gametype = new QTreeWidgetItem(t_diff);
-  //   t_gametype->setText(0, "Game type");
-  //   t_gametype->setText(1, cstr_from_gametype(diff.game_type));
-
-  //   auto *t_charter = new QTreeWidgetItem(t_diff);
-  //   t_charter->setText(0, "Charter");
-  //   t_charter->setText(1, diff.charter.c_str());
-
-  //   auto *t_difftype = new QTreeWidgetItem(t_diff);
-  //   t_difftype->setText(0, "Diff type");
-  //   t_difftype->setText(1, cstr_from_difftype(diff.diff_type));
-  //   QBrush brush(qcolor_from_difftype(diff.diff_type));
-  //   // QFont font; font.setBold(true); t_difftype->setFont(1, font);
-  //   t_difftype->setForeground(1, brush);
-
-  //   auto *t_diffval = new QTreeWidgetItem(t_diff);
-  //   t_diffval->setText(0, "Diff value");
-  //   t_diffval->setText(1, QString::number(diff.diff_num));
-
-  //   auto *t_notes = new QTreeWidgetItem(t_diff);
-  //   t_notes->setText(0, QString("Note rows (%1)").arg(diff.total_note_rows()));
-
-  //   auto *t_as_measures = new QTreeWidgetItem(t_diff);
-  //   t_as_measures->setText(0, QString("Measures (%1)").arg(diff.measures.size()));
-
-  //   auto draw_note_rows = [](QTreeWidgetItem *t_parent, std::vector<NoteRow> const& note_rows) {
-  //     for (auto nl : note_rows) {
-  //       auto *t_noteline = new QTreeWidgetItem(t_parent);
-  //       t_noteline->setText(0, QString("%1/%2/%3")
-  //                           .arg(nl.measure).arg(nl.beat).arg(nl.smticks));
-  //       QString line_s;
-  //       for (auto n : nl.notes) { line_s.push_back(static_cast<char>(n)); }
-  //       t_noteline->setText(1, line_s);
-        // -- stupid:
-        // -- * there is no verification
-        // -- * not per-column
-        // -- * I want to actually double-click to seek to that pos
-        // -- * it's not ergonomic anyway so ?????
-        // t_noteline->setFlags(t_noteline->flags() | Qt::ItemIsEditable);
-
-  //       QColor snap_color = qcolor_from_smticks(nl.smticks);
-  //       snap_color.setAlphaF(.12f); // 0 is fully transparent
-  //       QBrush brush(snap_color);
-  //       t_noteline->setBackground(1, brush);
-  //     }
-  //   };
-
-  //   int measure_i = 0;
-  //   for (auto m : diff.measures) {
-  //     auto *t_measure = new QTreeWidgetItem(t_as_measures);
-  //     t_measure->setText(0, QString("%1 (%2 row%3)")
-  //                        .arg(measure_i)
-  //                        .arg(m.note_rows.size())
-  //                        .arg(m.note_rows.size() == 1 ? "" : "s")
-  //     );
-  //     draw_note_rows(t_measure, m.note_rows);
-  //     measure_i += 1;
-  //   }
-  //   draw_note_rows(t_notes, diff.note_rows());
-
-  //   i++;
-  // }
-  // tree->expandAll();
-  // tree->resizeColumnToContents(0);
-
-
-
-  // -- must be already in the QTreeWidget (https://doc.qt.io/qt-6/qtreewidgetitem.html#setExpanded)
-
-  // QHBoxLayout layout(&w_root);
-  
-
-  
-  // QHBoxLayout resizable_layout;
-  // layout_.addLayout(&resizable_layout);
-  
-  // layout.addWidget(&tree, 5);
-  // resizable_layout.addWidget(tree);
   resizable_layout.addWidget(tree_view);
-
-  // QTextEdit viewer;
-  // viewer.setReadOnly(true);
-  // viewer.setText("A bunch of random text\nthat spans\na couple lines");
-  // layout.addWidget(&viewer, 2);
-
 
   // -- You can't scope these, they need to live somehow (on stack or heap).
   // -- Also, if you make them static, it aborts on exit for some reason
@@ -828,13 +684,6 @@ int main(int argc, char **argv) {
       preview_actual.setPalette(pal);
     preview_tile.addWidget(&preview_actual, 8);
 
-    // TODO: this guy needs to be updated when I scroll
-    // QLabel status_bar(QString("Measure %1, beat %2, smtick %3  |  Snap %4")
-    //                   .arg(preview_actual.chart_pos.measures)
-    //                   .arg(preview_actual.chart_pos.beats)
-    //                   .arg(preview_actual.chart_pos.smticks)
-    //                   .arg(preview_actual.current_snap_nths)
-    //                 );
     QLabel status_bar;
 
     auto on_pos_change =
@@ -847,6 +696,7 @@ int main(int argc, char **argv) {
           .arg(cstr_color_from_snap(snap))
           .arg(snap)
       );};
+    // set initial value
     on_pos_change(preview_actual.cur_chart_pos, preview_actual.current_snap_nths);
 
     QObject::connect(
@@ -875,16 +725,7 @@ int main(int argc, char **argv) {
       preview_controls.addWidget(&cmod_value, 1);
       preview_controls.setAlignment(&cmod_value, Qt::AlignCenter);      
 
-      // -- TODO: When I ctrl + scrollwheel over the preview area, do the following:
-      // * maybe just printf "hit!"
-      // * redraw snap lines
-      // * update snap value text (snap: 4th, 8th etc.)
-      // * (bonus: on ctrl + shift + scrollwheel, do fine snap increments)
-      // QLabel snap_text;
-      // preview_controls.addWidget(&snap_text, 1);
-
-      // doesn't look super aesthetic, but it's ok for now
-      // TODO: replace with QSpinBox
+      // -- TODO: This should be a QSpinBox
       QSlider cmod_slider(Qt::Vertical, nullptr);
         cmod_slider.setMinimum(300);
         cmod_slider.setMaximum(1000);
@@ -909,13 +750,6 @@ int main(int argc, char **argv) {
       preview_controls.setAlignment(&cmod_slider, Qt::AlignCenter);
     preview_tile.addLayout(&preview_controls, 1);
 
-  // layout.addLayout(&preview_tile, 4);
-  
-  // -- idk if this is correct
-  // 
-  // QWidget *right_chunk = new QWidget();
-  // right_chunk->setLayout(&preview_tile);
-  // resizable_layout.addWidget(right_chunk);
   resizable_layout.addWidget(&right_chunk);
 
   w_tabs_root.show();
