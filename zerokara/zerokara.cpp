@@ -197,7 +197,6 @@ public:
     cur_chart_pos = (new_pos.measures < 0) ? (SmRelativePos){0} : new_pos;
 
     // printf("raw smticks: %d\n", chart_pos.raw_smticks());
-    px_of_measure_zero = PX_VISUAL_OFFSET_FROM_HORIZ_LINE - px_per_smtick() * cur_chart_pos.total_smticks();
     this->update();
     emit positionChanged(cur_chart_pos, current_snap_nths);
   };
@@ -208,6 +207,8 @@ public:
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
 
+    // visually scroll to desired place
+    px_of_measure_zero = PX_VISUAL_OFFSET_FROM_HORIZ_LINE - px_per_smtick() * cur_chart_pos.total_smticks();
 
     int32_t note_width  = 60;
     int32_t note_height = 20;
@@ -360,19 +361,13 @@ enum class SmDoubleKind { Millis, Beats, Bpm };
 struct DoubleField  { double *data; SmDoubleKind kind; };
 struct KVFields     { std::vector<TimeKV> *data; SmDoubleKind kind; };
 using TreeValue = std::variant<
-  std::string *
-  , DoubleField
-  , std::vector<Difficulty> *
-  , DiffType *
-  , uint32_t *
->;
-using TreeValueTemporaryForLessCodeTyping = std::variant<
-  std::string *
-  , DoubleField
-  , std::vector<TimeKV> *
-  , std::vector<Difficulty> *
-  , DiffType *
-  , uint32_t *
+  // std::string *
+  DoubleField
+  // , std::vector<Difficulty> *
+  , DiffType
+  , uint32_t
+  , SmRelativePos // measure
+  , NoteRow       // particular noterow
 >;
 
 Q_DECLARE_METATYPE(TreeValue);
@@ -392,6 +387,7 @@ public:
     redraw_yourself();
   }
 
+  // XXXXXXXXXXXXXXXXX: this really should not be here I believe
   void redraw_yourself() {
     clear();
     
@@ -404,20 +400,20 @@ public:
     // let's try dealing with the string fields separately beacause they are
     // annoying and there's many of them. Other types like floats vary too much
     // for abstraction to be useful.
-    QList<TreeItem> string_fields;
-    string_fields.append((TreeItem){.key=("#TITLE"),  .value=&(smfile.title)});
-    string_fields.append((TreeItem){.key=("#MUSIC"),  .value=&(smfile.music)});
-    string_fields.append((TreeItem){.key=("#ARTIST"), .value=&(smfile.artist)});
+    std::vector<std::tuple<const char *,string>> string_fields;
+    string_fields.push_back({"#TITLE",  smfile.title});
+    string_fields.push_back({"#MUSIC",  smfile.music});
+    string_fields.push_back({"#ARTIST", smfile.artist});
 
     Cell *mtdt_cell = new Cell("Metadata");
     Cell *key_cell;
     Cell *value_cell;
 
-    for (auto sf : string_fields) {
-      std::string *value = std::get<std::string *>(sf.value);
-      key_cell = new Cell(sf.key);
-      value_cell = new Cell(QString::fromStdString(*value));
-      value_cell->setData(PACK(value)); mtdt_cell->appendRow({key_cell, value_cell});
+    for (auto [key,value] : string_fields) {
+      key_cell = new Cell(key);
+      value_cell = new Cell(QString::fromStdString(value));
+      // value_cell->setData(PACK(value));
+      mtdt_cell->appendRow({key_cell, value_cell});
     }
 
     // this might be a bit compressible, for now idc
@@ -487,7 +483,7 @@ public:
 
         auto *dt_n = new Cell("Diff type");
         auto *dt_v = new Cell(cstr_from_difftype(diff.diff_type));
-        DiffType *dt_ptr = &diff.diff_type;
+        DiffType dt_ptr = diff.diff_type;
         dt_v->setData(PACK(dt_ptr));
 
         QBrush brush(qcolor_from_difftype(diff.diff_type));
@@ -504,14 +500,18 @@ public:
         auto *measures_n = new Cell(u"Measures (%1)"_s.arg(diff.measures.size()));
         num_cell->appendRow(measures_n);
 
+        // NOTE: dragging around pointers for "magical editing" like this is extremely
+        // nasty, and stops working anyway the moment you have any data duplication
+        // like the note_rows() function. So just delete it
         auto draw_note_rows = [](Cell *t_parent, const std::vector<NoteRow>& note_rows) {
-          for (auto nl : note_rows) {
+          for (auto &nl : note_rows) {
             auto *t_noteline_snap = new Cell(
               (u"%1/%2/%3"_s.arg(nl.measure).arg(nl.beat).arg(nl.smticks))
             );
             QString line_s;
             for (auto n : nl.notes) { line_s.push_back((char)n); }
             auto *t_noteline_notes = new Cell(line_s);
+            t_noteline_notes->setData(PACK(nl));
 
             QColor snap_color = qcolor_from_smticks(nl.smticks);
             snap_color.setAlphaF(.12f); // 0 is fully transparent
@@ -521,9 +521,11 @@ public:
           }
         };
         draw_note_rows(nr_n, diff.note_rows());
-        int mr_i = 0;
+        int32_t mr_i = 0;
         for (auto m : diff.measures) {
           auto *measure_n = new Cell(u"Measure %1"_s.arg(mr_i));
+          auto pos = (SmRelativePos){mr_i, 0, 0};
+          measure_n->setData(PACK(pos));
           draw_note_rows(measure_n, m.note_rows);
           measures_n->appendRow(measure_n);
 
@@ -561,15 +563,15 @@ struct KVTreeViewDelegate : public QStyledItemDelegate {
 
     // another non-exhaustive dispatch
     if (0) {
-    } else if (std::holds_alternative<DiffType *>(data)) {
+    } else if (std::holds_alternative<DiffType>(data)) {
       printf("seems like difftype to me\n");
       QComboBox *combo = new QComboBox(parent);
       for (const char *cs : difftype_cstrs) { combo->addItem(cs); }
       return combo;
-    } else if (std::holds_alternative<std::string *>(data)) {
-      printf("seems like string to me\n");
-      auto *lineEdit = new QLineEdit(parent);
-      return lineEdit;
+    // } else if (std::holds_alternative<std::string *>(data)) {
+    //   printf("seems like string to me\n");
+    //   auto *lineEdit = new QLineEdit(parent);
+    //   return lineEdit;
     } else if (std::holds_alternative<DoubleField>(data)) {
       printf("seems like double to me\n");
       auto ff = std::get<DoubleField>(data);
@@ -597,7 +599,7 @@ struct KVTreeViewDelegate : public QStyledItemDelegate {
           break;
       }
       return doubleSpinBox;
-    } else if (std::holds_alternative<uint32_t *>(data)) {
+    } else if (std::holds_alternative<uint32_t>(data)) {
       printf("seems like uint32_t to me\n");
       auto *spinBox = new QSpinBox(parent);
       // -- TODO set this to whatever Etterna supports as maximum
@@ -649,19 +651,17 @@ int main(int argc, char **argv) {
   QTabWidget w_tabs_root;
   w_tabs_root.addTab(w_root, path);
 
-    // -- required so that it fills the entire space
-  QHBoxLayout layout_(w_root);
+  QHBoxLayout layout_(w_root); // -- required so that it fills the entire space
 
   QSplitter resizable_layout(Qt::Horizontal);
   layout_.addWidget(&resizable_layout);
 
-  // -- TODO: at some point, I would like QTreeView, so that I can change
-  // diff type with a dropdown. But I would need to scrap all of this
-  // and learn idk abstract qt model stuff.
-
+  // -- tree model of the whole file for a tree widget
   KVTreeModel        smfile_model(smfile);
   KVTreeViewDelegate smfile_view_delegate(&smfile_model);
   smfile_view_delegate.model = &smfile_model;
+
+  // -- tree widget
   QTreeView *tree_view = new QTreeView();
   tree_view->setModel(&smfile_model);
   tree_view->setItemDelegate(&smfile_view_delegate);
@@ -684,9 +684,9 @@ int main(int argc, char **argv) {
       preview_actual.setPalette(pal);
     preview_tile.addWidget(&preview_actual, 8);
 
-    QLabel status_bar;
 
-    auto on_pos_change =
+    QLabel status_bar;
+    auto redraw_statusbar =
       [&](SmRelativePos pos, int snap){status_bar.setText(
         QString("Measure %1, beat %2, smtick %3  |  "
                 "Snap <span style='color: %4; font-weight: 600;'>%5</span>")
@@ -697,13 +697,44 @@ int main(int argc, char **argv) {
           .arg(snap)
       );};
     // set initial value
-    on_pos_change(preview_actual.cur_chart_pos, preview_actual.current_snap_nths);
+    redraw_statusbar(preview_actual.cur_chart_pos, preview_actual.current_snap_nths);
 
     QObject::connect(
       &preview_actual,
       &NoteDisplayWidget::positionChanged,
-      on_pos_change
+      redraw_statusbar
     );
+
+    QObject::connect(
+      tree_view,
+      &QTreeView::doubleClicked,
+      &preview_actual,
+      // somehow get the item I'm clicking on. That item should store a ref
+      // to actual pos. Tell NoteDisplayWidget to seek to that pos and
+      // refresh itself.
+      [&](const QModelIndex &index){
+        QStandardItem *qitem = smfile_model.itemFromIndex(index);
+        QVariant qvar = qitem->data();
+        // ew! but works for now
+        TreeValue row_var = *(TreeValue *)qvar.data();
+        if (0) {
+        } else if (std::holds_alternative<NoteRow>(row_var)) {
+          NoteRow row = std::get<NoteRow>(row_var);
+          // NOTE: maybe put SmRelativePos into the sm_parser already
+          SmRelativePos new_pos = {(int32_t)row.measure, (int32_t)row.beat, (double)row.smticks};
+
+          // XXX: this really shouldn't be three statements like this
+          preview_actual.cur_chart_pos = new_pos;
+          preview_actual.update();
+          emit preview_actual.positionChanged(new_pos, preview_actual.current_snap_nths);
+        } else if (std::holds_alternative<SmRelativePos>(row_var)) {
+          auto new_pos = std::get<SmRelativePos>(row_var);
+          preview_actual.cur_chart_pos = new_pos;
+          preview_actual.update();
+        }
+      }
+    );
+
     preview_tile.addWidget(&status_bar, 0);
     preview_tile.setAlignment(&status_bar, Qt::AlignCenter);
     
