@@ -1,4 +1,3 @@
-#pragma once
 
 // base
 #include <QApplication>
@@ -16,7 +15,6 @@
 #include <QSplitter>
 #include <QTabWidget>
 #include <QTextEdit>
-#include <QTreeWidget>
 #include <QWindow>
 
 // painter stuff
@@ -26,7 +24,10 @@
 #include <QScrollEvent>
 
 // custom model stuff
+#include <QTreeView>
 #include <QStandardItemModel>
 #include <QStyledItemDelegate>
 
-extern int suppress_the_spurious_include_warning;
+#include <QColor>
+
+static int suppress_the_spurious_include_warning;

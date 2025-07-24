@@ -1,15 +1,31 @@
-#include "sm_parser.cpp"
-
-#include "qt_includes.h"
-void __please(){suppress_the_spurious_include_warning=0;};
-
+// #include "sm_parser.cpp"
 
 #include <fstream>
+#include <string>
+using std::string;
 
 // reload hacks
 #include <sys/inotify.h>
 #include <unistd.h>
 
+#include "sm_parser.h"
+#include "qt_includes.h"
+
+
+void __please(){suppress_the_spurious_include_warning=0;};
+
+QColor qcolor_from_difftype(DiffType dt)
+{
+  switch (dt) {
+    case DiffType::Beginner:  return QColorConstants::DarkCyan;
+    case DiffType::Easy:      return QColorConstants::DarkGreen;
+    case DiffType::Medium:    return QColorConstants::Svg::darkorange;
+    case DiffType::Hard:      return QColorConstants::DarkRed;
+    case DiffType::Challenge: return QColorConstants::Svg::purple;
+    case DiffType::Edit:      return QColorConstants::DarkGray;
+  }
+  assert(false);
+}
 
 SmFile smfile;
 

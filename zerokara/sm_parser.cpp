@@ -1,9 +1,11 @@
 #include "sm_parser.h"
-#include <algorithm>
 #include <cassert>
-#include <chrono>
+// -- <chrono> includes std::any_of and format, but not whole <algorithm> because
+// -- that one is 7k extra lines with -E. Curious.
+// #include <chrono>
+#include "dumb_chrono.cpp"
+#include <format>
 #include <ranges>
-#include <QColor>
 
 using std::array;
 using std::string;
@@ -59,18 +61,6 @@ const char *cstr_from_difftype(DiffType dt)
   return difftype_cstrs[idx];
 }
 
-QColor qcolor_from_difftype(DiffType dt)
-{
-  switch (dt) {
-    case DiffType::Beginner:  return QColorConstants::DarkCyan;
-    case DiffType::Easy:      return QColorConstants::DarkGreen;
-    case DiffType::Medium:    return QColorConstants::Svg::darkorange;
-    case DiffType::Hard:      return QColorConstants::DarkRed;
-    case DiffType::Challenge: return QColorConstants::Svg::purple;
-    case DiffType::Edit:      return QColorConstants::DarkGray;
-  }
-  assert(false);
-}
 const char *cstr_from_gametype(GameType gt)
 {
   switch (gt) {
@@ -131,7 +121,8 @@ smfile_from_string_opt(string const& str)
   */
 
   SmFile smfile {};
-  auto tb = std::chrono::system_clock::now();
+  // auto tb = std::chrono::system_clock::now();
+  auto tb = Chrono::now();
 
   /* let's use the C api instead */
 
@@ -144,8 +135,11 @@ smfile_from_string_opt(string const& str)
     size_t hash_pos = sv.find('#');
     if (hash_pos == string::npos) {
 
-      auto te = std::chrono::system_clock::now();
-      auto us = std::chrono::duration_cast<std::chrono::microseconds>(te-tb).count();
+      // auto te = std::chrono::system_clock::now();
+      // auto us = std::chrono::duration_cast<std::chrono::microseconds>(te-tb).count();
+      auto te = Chrono::now();
+      auto us = (te-tb).microseconds();
+      
       // std::print(stderr, "Parsed an SmFile in {} seconds", (double)us / 1000000.);
       eprintf("Parsed an SmFile in %lf seconds", (double)us / 1000000.);
       return smfile;

@@ -1,3 +1,5 @@
+#ifndef SM_PARSER_H
+#define SM_PARSER_H
 #include <string>
 #include <cstdint>
 #include <array>
@@ -91,3 +93,9 @@ struct SmParseError {
 
 std::variant<SmFile, SmParseError>
 smfile_from_string_opt(std::string const& str);
+
+const char *cstr_from_gametype(GameType gt);
+const char *cstr_from_difftype(DiffType gt);
+extern std::vector<const char *> difftype_cstrs;
+
+#endif
