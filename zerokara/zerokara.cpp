@@ -356,14 +356,17 @@ class Cell : public QStandardItem {
 };
 using TimeKVs      = std::vector<TimeKV>;
 using Difficulties = std::vector<Difficulty>;
-struct DoubleField {
-  double *data;
-  // We will get float increment inaccuracies, but if you visually round it up,
-  // it should be fine I hope
-  double spinbox_normal_increment;
-  double spinbox_shift_increment;
-};
+enum class SmDoubleKind { Millis, Beats, Bpm };
+struct DoubleField  { double *data; SmDoubleKind kind; };
+struct KVFields     { std::vector<TimeKV> *data; SmDoubleKind kind; };
 using TreeValue = std::variant<
+  std::string *
+  , DoubleField
+  , std::vector<Difficulty> *
+  , DiffType *
+  , uint32_t *
+>;
+using TreeValueTemporaryForLessCodeTyping = std::variant<
   std::string *
   , DoubleField
   , std::vector<TimeKV> *
@@ -371,6 +374,7 @@ using TreeValue = std::variant<
   , DiffType *
   , uint32_t *
 >;
+
 Q_DECLARE_METATYPE(TreeValue);
 
 struct TreeItem { QString key; TreeValue value; };
@@ -393,139 +397,147 @@ public:
     
     this->setColumnCount(2);
 
+
+    // smuggle a pointer in a QVariant
+    #define PACK(x) QVariant::fromValue(TreeValue(x))
+
+    // let's try dealing with the string fields separately beacause they are
+    // annoying and there's many of them. Other types like floats vary too much
+    // for abstraction to be useful.
+    QList<TreeItem> string_fields;
+    string_fields.append((TreeItem){.key=("#TITLE"),  .value=&(smfile.title)});
+    string_fields.append((TreeItem){.key=("#MUSIC"),  .value=&(smfile.music)});
+    string_fields.append((TreeItem){.key=("#ARTIST"), .value=&(smfile.artist)});
+
     Cell *mtdt_cell = new Cell("Metadata");
+    Cell *key_cell;
+    Cell *value_cell;
 
-    // HACK: throw all SmFile fields on one temporary pile so the code is shorter.
-    QList<TreeItem> mtdt_fields;
-    mtdt_fields.append((TreeItem){.key=("#TITLE"),       .value=&(smfile.title)});
-    mtdt_fields.append((TreeItem){.key=("#MUSIC"),       .value=&(smfile.music)});
-    mtdt_fields.append((TreeItem){.key=("#ARTIST"),      .value=&(smfile.artist)});
-    mtdt_fields.append((TreeItem){
-      .key=("#OFFSET"),
-      .value=(DoubleField){&(smfile.offset),0.01,0.001}});
-    mtdt_fields.append((TreeItem){
-      .key=("#SAMPLESTART"),
-      .value=(DoubleField){&(smfile.samplestart),0.01,0.001}});
-    mtdt_fields.append((TreeItem){
-      .key=("#SAMPLELENGTH"),
-      .value=(DoubleField){&(smfile.samplelength),0.01,0.001}});
-    mtdt_fields.append((TreeItem){.key=("#BPMS"),        .value=&(smfile.bpms)});
-    mtdt_fields.append((TreeItem){.key=("#STOPS"),       .value=&(smfile.stops)});
-    // ...
+    for (auto sf : string_fields) {
+      std::string *value = std::get<std::string *>(sf.value);
+      key_cell = new Cell(sf.key);
+      value_cell = new Cell(QString::fromStdString(*value));
+      value_cell->setData(PACK(value)); mtdt_cell->appendRow({key_cell, value_cell});
+    }
 
+    // this might be a bit compressible, for now idc
     // NOTE:
     // So, there is this unfortunate thing where you have to set your data twice:
-    // once as visual-only strings and second time for actual values that you can edit.
-    //
-    // Alternatively you can have a "model" which mirrors the whole widget tree and look up in there,
-    // but that's a duplication anyway. So, we're going to set each editable item twice.
-    // 
-    // Actually maybe setData() should get pointers to SmFile fields so this redraws correctly.
-    //
+    // once as visual-only strings and second time for actual values that you can edit
+    // (+ instructions for QStyledItemDelegate such as spinbox steps).
+    // You have to have some mapping of SmFile fields to actual indexes of the table,
+    // and for that I just set the data field into the value itself because it's more
+    // convenient.
     
-    for (auto l : mtdt_fields) {
-      auto *key_cell = new Cell(l.key);
-      Cell *value_cell;
-
-      // smuggle a pointer in a QVariant
-      #define PACK(x) QVariant::fromValue(TreeValue(x))
-
-      QString value_str;
-      if (0) {
-      } else if (std::holds_alternative<std::string *>(l.value)) { // most fields
-        std::string *ptr = std::get<std::string *>(l.value);
-        value_cell = new Cell(QString::fromStdString(*ptr));
-        value_cell->setData(PACK(ptr));
-      } else if (std::holds_alternative<DoubleField>(l.value)) { // #OFFSET, #SAMPLESTART, #SAMPLELENGTH
-        auto ff = std::get<DoubleField>(l.value);
-        value_str = QString::number(*ff.data);
-        value_cell = new Cell(value_str);
-        value_cell->setData(PACK(ff));
-      } else if (std::holds_alternative<std::vector<TimeKV> *>(l.value)) { // #BPMS, #STOPS
-        for (auto &timekv : *std::get<TimeKVs *>(l.value)) {
-          double *time_ptr = &timekv.beat_number;
-          auto *time_cell  = new Cell(QString::number(*time_ptr));
-          auto tff = (DoubleField){time_ptr,1.,1./48};
-          time_cell->setData(PACK(tff));
-          double *value_ptr = &timekv.value;
-          auto *value_cell = new Cell(QString::number(*value_ptr));
-          auto vff = (DoubleField){value_ptr,1.,0.01};
-          value_cell->setData(PACK(vff));
-          key_cell->appendRow({time_cell, value_cell});
-        }
-      } else {
-        assert(false);
+    {
+      key_cell = new Cell("#OFFSET");
+      value_cell = new Cell(QString::number(smfile.offset));
+      DoubleField value = {&(smfile.offset),SmDoubleKind::Millis};
+      value_cell->setData(PACK(value)); mtdt_cell->appendRow({key_cell, value_cell});
+    }
+    {
+      key_cell = new Cell("#SAMPLESTART");
+      value_cell = new Cell(QString::number(smfile.samplestart));
+      DoubleField value = {&(smfile.samplestart),SmDoubleKind::Millis};
+      value_cell->setData(PACK(value)); mtdt_cell->appendRow({key_cell, value_cell});
+    }
+    {
+      key_cell = new Cell("#SAMPLELENGTH");
+      value_cell = new Cell(QString::number(smfile.samplelength));
+      DoubleField value = {&(smfile.samplelength),SmDoubleKind::Millis};
+      value_cell->setData(PACK(value)); mtdt_cell->appendRow({key_cell, value_cell});
+    }
+    {
+      key_cell = new Cell("#BPMS"); value_cell = new Cell();
+      for (auto &pair : smfile.bpms) {
+        auto *beat_cell = new Cell(QString::number(pair.beat_number));
+        auto *bpm_cell  = new Cell(QString::number(pair.value));
+        DoubleField value = {&pair.value, SmDoubleKind::Bpm};
+        bpm_cell->setData(PACK(value)); key_cell->appendRow({beat_cell, bpm_cell});
       }
       mtdt_cell->appendRow({key_cell, value_cell});
     }
-    appendRow(mtdt_cell); // probably the root item?
-
-
-    Cell *diff_cell = new Cell("Difficulties");
-    diff_cell->setColumnCount(2);
-
-    int diff_i = 0;
-    for (auto diff : smfile.diffs) {
-      auto *num_cell = new Cell(QString::number(diff_i));
-
-      auto *gt_n = new Cell("Game type");
-      auto *gt_v = new Cell(cstr_from_gametype(diff.game_type));
-      num_cell->appendRow({gt_n, gt_v});
-      auto *ct_n = new Cell("Charter");
-      auto *ct_v = new Cell(QString::fromStdString(diff.charter));
-      num_cell->appendRow({ct_n, ct_v});
-
-      auto *dt_n = new Cell("Diff type");
-      auto *dt_v = new Cell(cstr_from_difftype(diff.diff_type));
-      DiffType *dt_ptr = &diff.diff_type;
-      dt_v->setData(PACK(dt_ptr));
-
-      QBrush brush(qcolor_from_difftype(diff.diff_type));
-      // QFont font; font.setBold(true); t_difftype->setFont(1, font);
-      dt_v->setForeground(brush);
-      num_cell->appendRow({dt_n, dt_v});
-
-      auto *dv_n = new Cell("Diff value");
-      auto *dv_v = new Cell(QString::number(diff.diff_num));
-      dv_v->setData(diff.diff_num);
-      num_cell->appendRow({dv_n, dv_v});
-      auto *nr_n = new Cell(u"Note rows (%1)"_s.arg(diff.total_note_rows()));
-      num_cell->appendRow(nr_n);
-      auto *mrs_n = new Cell(u"Measures (%1)"_s.arg(diff.measures.size()));
-      num_cell->appendRow(mrs_n);
-
-      auto draw_note_rows = [](Cell *t_parent, const std::vector<NoteRow>& note_rows) {
-        for (auto nl : note_rows) {
-          auto *t_noteline_snap = new Cell(
-            (QString("%1/%2/%3").arg(nl.measure).arg(nl.beat).arg(nl.smticks))
-          );
-          QString line_s;
-          for (auto n : nl.notes) { line_s.push_back((char)n); }
-          auto *t_noteline_notes = new Cell(line_s);
-
-          QColor snap_color = qcolor_from_smticks(nl.smticks);
-          snap_color.setAlphaF(.12f); // 0 is fully transparent
-          QBrush brush(snap_color);
-          t_noteline_notes->setBackground(brush);
-          t_parent->appendRow({t_noteline_snap, t_noteline_notes});
-        }
-      };
-      draw_note_rows(nr_n, diff.note_rows());
-      int mr_i = 0;
-      for (auto m : diff.measures) {
-        auto *mr_n = new Cell(u"Measure %1"_s.arg(mr_i));
-        draw_note_rows(mr_n, m.note_rows);
-        mrs_n->appendRow(mr_n);
-
-        mr_i += 1;
+    {
+      key_cell = new Cell("#STOPS"); value_cell = new Cell();
+      for (auto &pair : smfile.stops) {
+        auto *beat_cell = new Cell(QString::number(pair.beat_number));
+        auto *ms_cell   = new Cell(QString::number(pair.value)); // maybe ??????
+        DoubleField value = {&pair.value, SmDoubleKind::Beats};
+        ms_cell->setData(PACK(value)); key_cell->appendRow({beat_cell, ms_cell});
       }
-      
-      diff_cell->appendRow(num_cell);
-      diff_i += 1;
+      mtdt_cell->appendRow({key_cell, value_cell});
     }
-    appendRow(diff_cell);
+    this->invisibleRootItem()->appendRow(mtdt_cell);
+
+    // ----------- diffs ---------------
+    {
+      auto *diffs_cell = new Cell("Difficulties");
+      diffs_cell->setColumnCount(2);
+
+      size_t diff_i = 0;
+      for (auto diff : smfile.diffs) {
+        auto *num_cell = new Cell(QString::number(diff_i));
+
+        auto *gt_n = new Cell("Game type");
+        auto *gt_v = new Cell(cstr_from_gametype(diff.game_type));
+        num_cell->appendRow({gt_n, gt_v});
+        auto *ct_n = new Cell("Charter");
+        auto *ct_v = new Cell(QString::fromStdString(diff.charter));
+        num_cell->appendRow({ct_n, ct_v});
+
+        auto *dt_n = new Cell("Diff type");
+        auto *dt_v = new Cell(cstr_from_difftype(diff.diff_type));
+        DiffType *dt_ptr = &diff.diff_type;
+        dt_v->setData(PACK(dt_ptr));
+
+        QBrush brush(qcolor_from_difftype(diff.diff_type));
+        // QFont font; font.setBold(true); t_difftype->setFont(1, font);
+        dt_v->setForeground(brush);
+        num_cell->appendRow({dt_n, dt_v});
+
+        auto *dv_n = new Cell("Diff value");
+        auto *dv_v = new Cell(QString::number(diff.diff_num));
+        dv_v->setData(diff.diff_num);
+        num_cell->appendRow({dv_n, dv_v});
+        auto *nr_n = new Cell(u"Note rows (%1)"_s.arg(diff.total_note_rows()));
+        num_cell->appendRow(nr_n);
+        auto *measures_n = new Cell(u"Measures (%1)"_s.arg(diff.measures.size()));
+        num_cell->appendRow(measures_n);
+
+        auto draw_note_rows = [](Cell *t_parent, const std::vector<NoteRow>& note_rows) {
+          for (auto nl : note_rows) {
+            auto *t_noteline_snap = new Cell(
+              (QString("%1/%2/%3").arg(nl.measure).arg(nl.beat).arg(nl.smticks))
+            );
+            QString line_s;
+            for (auto n : nl.notes) { line_s.push_back((char)n); }
+            auto *t_noteline_notes = new Cell(line_s);
+
+            QColor snap_color = qcolor_from_smticks(nl.smticks);
+            snap_color.setAlphaF(.12f); // 0 is fully transparent
+            QBrush brush(snap_color);
+            t_noteline_notes->setBackground(brush);
+            t_parent->appendRow({t_noteline_snap, t_noteline_notes});
+          }
+        };
+        draw_note_rows(nr_n, diff.note_rows());
+        int mr_i = 0;
+        for (auto m : diff.measures) {
+          auto *measure_n = new Cell(u"Measure %1"_s.arg(mr_i));
+          draw_note_rows(measure_n, m.note_rows);
+          measures_n->appendRow(measure_n);
+
+          mr_i += 1;
+        }
+      
+        diffs_cell->appendRow(num_cell);
+        diff_i += 1;
+      } // end of diff loop
+      this->invisibleRootItem()->appendRow(diffs_cell);
+    } // end of all diffs
   }
 };
+
 
 struct KVTreeViewDelegate : public QStyledItemDelegate {
   KVTreeModel *model;
@@ -562,11 +574,28 @@ struct KVTreeViewDelegate : public QStyledItemDelegate {
       printf("seems like double to me\n");
       auto ff = std::get<DoubleField>(data);
       auto *doubleSpinBox = new QDoubleSpinBox(parent);
-      doubleSpinBox->setSingleStep(ff.spinbox_normal_increment);
+
       // TODO: I don't know how to deal with Shift here
-      doubleSpinBox->setDecimals(3);
-      // -- this depends
-      doubleSpinBox->setMaximum(10000);
+      switch (ff.kind) {
+        case SmDoubleKind::Millis:
+          doubleSpinBox->setSingleStep(0.01);
+          doubleSpinBox->setDecimals(3);
+          doubleSpinBox->setMinimum(-50000);
+          doubleSpinBox->setMaximum(100000); // -- this depends
+          break;
+        case SmDoubleKind::Beats:
+          doubleSpinBox->setSingleStep(1);
+          doubleSpinBox->setDecimals(2);
+          doubleSpinBox->setMinimum(0);
+          doubleSpinBox->setMaximum(100000); // -- this depends
+          break;
+        case SmDoubleKind::Bpm:
+          doubleSpinBox->setSingleStep(1);
+          doubleSpinBox->setDecimals(2);
+          doubleSpinBox->setMinimum(1);     // idk what negbpm really means
+          doubleSpinBox->setMaximum(10000); // -- this depends
+          break;
+      }
       return doubleSpinBox;
     } else if (std::holds_alternative<uint32_t *>(data)) {
       printf("seems like uint32_t to me\n");
