@@ -17,6 +17,8 @@ SmFile smfile;
 
 using namespace Qt::Literals::StringLiterals;
 
+const char *cstr_color_from_snap (int snap);
+
 // -- I might want to unify these two maybe ???
 QColor qcolor_from_smticks(double smticks) {
   assert(smticks <= 48.0);
@@ -36,6 +38,17 @@ QColor qcolor_from_smticks(double smticks) {
   }
   return QColorConstants::Gray;
 }
+const char *cstr_from_smticks(double smticks) {
+  if (std::fmod(smticks, 48/1) == 0) return "red";
+  if (std::fmod(smticks, 48/2) == 0) return "blue";
+  if (std::fmod(smticks, 48/3) == 0) return "green";
+  if (std::fmod(smticks, 48/4) == 0) return "goldenrod";
+  if (std::fmod(smticks, 48/6) == 0) return "magenta";
+  if (std::fmod(smticks, 48/8) == 0) return "orange";
+  if (std::fmod(smticks, 48/12) == 0) return "deepskyblue";
+  return "grey";
+}
+
 // this is for the Snap xx highlight
 const char *cstr_color_from_snap (int snap) {
   switch (snap) {
@@ -171,7 +184,10 @@ public:
   /// ctrl+shift -> change snap (fine)
   void wheelEvent(QWheelEvent *event) override {
     auto modifiers = QGuiApplication::keyboardModifiers();
-    SmRelativePos new_pos;
+    SmRelativePos new_pos = cur_chart_pos;
+
+    // printf("pos before: %d %d %lf\n",
+    //        cur_chart_pos.measures, cur_chart_pos.beats, cur_chart_pos.smticks);
 
     if (modifiers & Qt::ControlModifier) { // change snap
       if (event->angleDelta().ry() < 0) {
@@ -194,6 +210,7 @@ public:
         new_pos = SmRelativePos::incremented_by(cur_chart_pos, +smticks_in_1_(current_snap_nths));
       }
     }
+    // printf("pos after: %d %d %lg\n", new_pos.measures, new_pos.beats, new_pos.smticks);
     cur_chart_pos = (new_pos.measures < 0) ? (SmRelativePos){0} : new_pos;
 
     // printf("raw smticks: %d\n", chart_pos.raw_smticks());
@@ -201,9 +218,7 @@ public:
     emit positionChanged(cur_chart_pos, current_snap_nths);
   };
 
-  void paintEvent(QPaintEvent *event) override {
-    (void) event;
-    
+  void paintEvent(QPaintEvent */*event*/) override {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
 
@@ -361,8 +376,8 @@ enum class SmDoubleKind { Millis, Beats, Bpm };
 struct DoubleField  { double *data; SmDoubleKind kind; };
 struct KVFields     { std::vector<TimeKV> *data; SmDoubleKind kind; };
 using TreeValue = std::variant<
-  // std::string *
-  DoubleField
+  std::string *
+  , DoubleField
   // , std::vector<Difficulty> *
   , DiffType
   , uint32_t
@@ -412,7 +427,7 @@ public:
     for (auto [key,value] : string_fields) {
       key_cell = new Cell(key);
       value_cell = new Cell(QString::fromStdString(value));
-      // value_cell->setData(PACK(value));
+      value_cell->setData(PACK(&value));
       mtdt_cell->appendRow({key_cell, value_cell});
     }
 
@@ -444,35 +459,36 @@ public:
       value_cell->setData(PACK(value)); mtdt_cell->appendRow({key_cell, value_cell});
     }
     {
-      key_cell = new Cell("#BPMS"); value_cell = new Cell();
+      key_cell = new Cell("#BPMS"); /*value_cell = new Cell();*/
       for (auto &pair : smfile.bpms) {
         auto *beat_cell = new Cell(QString::number(pair.beat_number));
         auto *bpm_cell  = new Cell(QString::number(pair.value));
         DoubleField value = {&pair.value, SmDoubleKind::Bpm};
         bpm_cell->setData(PACK(value)); key_cell->appendRow({beat_cell, bpm_cell});
       }
-      mtdt_cell->appendRow({key_cell, value_cell});
+      mtdt_cell->appendRow(key_cell /*, value_cell */);
     }
     {
-      key_cell = new Cell("#STOPS"); value_cell = new Cell();
+      key_cell = new Cell("#STOPS"); /*value_cell = new Cell();*/
       for (auto &pair : smfile.stops) {
         auto *beat_cell = new Cell(QString::number(pair.beat_number));
         auto *ms_cell   = new Cell(QString::number(pair.value)); // maybe ??????
         DoubleField value = {&pair.value, SmDoubleKind::Beats};
         ms_cell->setData(PACK(value)); key_cell->appendRow({beat_cell, ms_cell});
       }
-      mtdt_cell->appendRow({key_cell, value_cell});
+      mtdt_cell->appendRow(key_cell/*, value_cell}*/);
     }
     this->invisibleRootItem()->appendRow(mtdt_cell);
 
     // ----------- diffs ---------------
     {
       auto *diffs_cell = new Cell("Difficulties");
-      diffs_cell->setColumnCount(2);
+      // diffs_cell->setColumnCount(2);
 
       size_t diff_i = 0;
       for (auto diff : smfile.diffs) {
         auto *num_cell = new Cell(QString::number(diff_i));
+        num_cell->setColumnCount(1);
 
         auto *gt_n = new Cell("Game type");
         auto *gt_v = new Cell(cstr_from_gametype(diff.game_type));
@@ -500,23 +516,25 @@ public:
         auto *measures_n = new Cell(u"Measures (%1)"_s.arg(diff.measures.size()));
         num_cell->appendRow(measures_n);
 
-        // NOTE: dragging around pointers for "magical editing" like this is extremely
-        // nasty, and stops working anyway the moment you have any data duplication
-        // like the note_rows() function. So just delete it
         auto draw_note_rows = [](Cell *t_parent, const std::vector<NoteRow>& note_rows) {
           for (auto &nl : note_rows) {
             auto *t_noteline_snap = new Cell(
-              (u"%1/%2/%3"_s.arg(nl.measure).arg(nl.beat).arg(nl.smticks))
+              u"%1/%2/<span style='color: %4; font-weight: 600;'>%3</span>"_s
+              // u"%1/%2/%3"_s
+              .arg(nl.measure).arg(nl.beat).arg(nl.smticks)
+              .arg(cstr_from_smticks(nl.smticks))
             );
             QString line_s;
             for (auto n : nl.notes) { line_s.push_back((char)n); }
             auto *t_noteline_notes = new Cell(line_s);
+            t_noteline_snap->setData(PACK(nl));
             t_noteline_notes->setData(PACK(nl));
 
-            QColor snap_color = qcolor_from_smticks(nl.smticks);
-            snap_color.setAlphaF(.12f); // 0 is fully transparent
-            QBrush brush(snap_color);
-            t_noteline_notes->setBackground(brush);
+            // -- alternatively, set background color:
+            // QColor snap_color = qcolor_from_smticks(nl.smticks);
+            // snap_color.setAlphaF(.12f); // 0 is fully transparent
+            // QBrush brush(snap_color);
+            // t_noteline_notes->setBackground(brush);
             t_parent->appendRow({t_noteline_snap, t_noteline_notes});
           }
         };
@@ -545,17 +563,43 @@ struct KVTreeViewDelegate : public QStyledItemDelegate {
   KVTreeModel *model;
   KVTreeViewDelegate(KVTreeModel *model) : model(model) {}
 
+  // Copied from StackOverflow, no idea. Goal is to provide rich text rendering
+  // for field text
+  void paint(QPainter *painter, const QStyleOptionViewItem &option,
+             const QModelIndex &index) const override {
+
+    QStyleOptionViewItem option_ = option;
+    initStyleOption(&option_, index);
+
+    painter->save();
+
+    QTextDocument doc;
+    doc.setHtml(option_.text);
+
+    option_.text = "";
+    option_.widget->style()->drawControl(QStyle::CE_ItemViewItem, &option_, painter);
+
+    painter->translate(option_.rect.left(), option_.rect.top());
+    QRect clip(0, 0, option_.rect.width(), option_.rect.height());
+    doc.drawContents(painter, clip);
+
+    painter->restore();
+  }
+
   QWidget* createEditor(QWidget* parent, const QStyleOptionViewItem& option, 
                      const QModelIndex& index) const override {
 
 
-    (void)option; // for now
-    // note: QStyledItemDelegate::createEditor returns nullptr anyway
+    // nullptr -> segfault, parent class -> free invalid size
+    // if (!index.isValid())
+    // return QStyledItemDelegate::createEditor(parent, option, index);
 
     // TreeValue val;
     printf("createEditor called | getting item from index %d\n", index.row());
     // this can't work, the data is tree-like and the index has just a row ????
     QStandardItem *item = model->itemFromIndex(index);
+    printf("it has %d columns, and ", item->columnCount());
+
     assert(item);
     QVariant qdata = item->data();
     // XXX: really nasty, there must be some proper way
@@ -568,10 +612,10 @@ struct KVTreeViewDelegate : public QStyledItemDelegate {
       QComboBox *combo = new QComboBox(parent);
       for (const char *cs : difftype_cstrs) { combo->addItem(cs); }
       return combo;
-    // } else if (std::holds_alternative<std::string *>(data)) {
-    //   printf("seems like string to me\n");
-    //   auto *lineEdit = new QLineEdit(parent);
-    //   return lineEdit;
+    } else if (std::holds_alternative<std::string *>(data)) {
+      printf("seems like string to me\n");
+      auto *lineEdit = new QLineEdit(parent);
+      return lineEdit;
     } else if (std::holds_alternative<DoubleField>(data)) {
       printf("seems like double to me\n");
       auto ff = std::get<DoubleField>(data);
