@@ -349,17 +349,27 @@ class Cell : public QStandardItem {
   Cell() : QStandardItem() {
   }
   Cell(QString str) : QStandardItem(str) {
+    // -- TODO: second columns of rows like [Difficulties] or [0]
+    // -- are editable anyway, this should be set elsewhere probably maybe idk
     // this->setEditable(false);
   };
 };
 using TimeKVs      = std::vector<TimeKV>;
 using Difficulties = std::vector<Difficulty>;
+struct DoubleField {
+  double *data;
+  // We will get float increment inaccuracies, but if you visually round it up,
+  // it should be fine I hope
+  double spinbox_normal_increment;
+  double spinbox_shift_increment;
+};
 using TreeValue = std::variant<
-  std::string,
-  double,
-  std::vector<TimeKV>,
-  std::vector<Difficulty>,
-  DiffType
+  std::string *
+  , DoubleField
+  , std::vector<TimeKV> *
+  , std::vector<Difficulty> *
+  , DiffType *
+  , uint32_t *
 >;
 Q_DECLARE_METATYPE(TreeValue);
 
@@ -387,14 +397,20 @@ public:
 
     // HACK: throw all SmFile fields on one temporary pile so the code is shorter.
     QList<TreeItem> mtdt_fields;
-    mtdt_fields.append((TreeItem){.key=("#TITLE"),        .value=(smfile.title)});
-    mtdt_fields.append((TreeItem){.key=("#MUSIC"),        .value=(smfile.music)});
-    mtdt_fields.append((TreeItem){.key=("#ARTIST"),       .value=(smfile.artist)});
-    mtdt_fields.append((TreeItem){.key=("#OFFSET"),       .value=(smfile.offset)});
-    mtdt_fields.append((TreeItem){.key=("#SAMPLESTART"),  .value=(smfile.samplestart)});
-    mtdt_fields.append((TreeItem){.key=("#SAMPLELENGTH"), .value=(smfile.samplelength)});
-    mtdt_fields.append((TreeItem){.key=("#BPMS"),         .value=(smfile.bpms)});
-    mtdt_fields.append((TreeItem){.key=("#STOPS"),        .value=(smfile.stops)});
+    mtdt_fields.append((TreeItem){.key=("#TITLE"),       .value=&(smfile.title)});
+    mtdt_fields.append((TreeItem){.key=("#MUSIC"),       .value=&(smfile.music)});
+    mtdt_fields.append((TreeItem){.key=("#ARTIST"),      .value=&(smfile.artist)});
+    mtdt_fields.append((TreeItem){
+      .key=("#OFFSET"),
+      .value=(DoubleField){&(smfile.offset),0.01,0.001}});
+    mtdt_fields.append((TreeItem){
+      .key=("#SAMPLESTART"),
+      .value=(DoubleField){&(smfile.samplestart),0.01,0.001}});
+    mtdt_fields.append((TreeItem){
+      .key=("#SAMPLELENGTH"),
+      .value=(DoubleField){&(smfile.samplelength),0.01,0.001}});
+    mtdt_fields.append((TreeItem){.key=("#BPMS"),        .value=&(smfile.bpms)});
+    mtdt_fields.append((TreeItem){.key=("#STOPS"),       .value=&(smfile.stops)});
     // ...
 
     // NOTE:
@@ -411,22 +427,30 @@ public:
       auto *key_cell = new Cell(l.key);
       Cell *value_cell;
 
+      // smuggle a pointer in a QVariant
+      #define PACK(x) QVariant::fromValue(TreeValue(x))
+
       QString value_str;
       if (0) {
-      } else if (std::holds_alternative<std::string>(l.value)) { // most fields
-        std::string str = std::get<std::string>(l.value);
-        value_str = QString::fromStdString(str);
+      } else if (std::holds_alternative<std::string *>(l.value)) { // most fields
+        std::string *ptr = std::get<std::string *>(l.value);
+        value_cell = new Cell(QString::fromStdString(*ptr));
+        value_cell->setData(PACK(ptr));
+      } else if (std::holds_alternative<DoubleField>(l.value)) { // #OFFSET, #SAMPLESTART, #SAMPLELENGTH
+        auto ff = std::get<DoubleField>(l.value);
+        value_str = QString::number(*ff.data);
         value_cell = new Cell(value_str);
-      } else if (std::holds_alternative<double>(l.value)) { // #OFFSET, #SAMPLESTART, #SAMPLELENGTH
-        value_str = QString::number(std::get<double>(l.value));
-        value_cell = new Cell(value_str);
-      } else if (std::holds_alternative<std::vector<TimeKV>>(l.value)) { // #BPMS, #STOPS
-        value_cell = new Cell(""); // no text on second column
-        for (auto timekv : std::get<TimeKVs>(l.value)) {
-          auto *time_cell  = new Cell(QString::number(timekv.beat_number));
-          time_cell->setData(timekv.beat_number);
-          auto *value_cell = new Cell(QString::number(timekv.value));
-          value_cell->setData(timekv.value);
+        value_cell->setData(PACK(ff));
+      } else if (std::holds_alternative<std::vector<TimeKV> *>(l.value)) { // #BPMS, #STOPS
+        for (auto &timekv : *std::get<TimeKVs *>(l.value)) {
+          double *time_ptr = &timekv.beat_number;
+          auto *time_cell  = new Cell(QString::number(*time_ptr));
+          auto tff = (DoubleField){time_ptr,1.,1./48};
+          time_cell->setData(PACK(tff));
+          double *value_ptr = &timekv.value;
+          auto *value_cell = new Cell(QString::number(*value_ptr));
+          auto vff = (DoubleField){value_ptr,1.,0.01};
+          value_cell->setData(PACK(vff));
           key_cell->appendRow({time_cell, value_cell});
         }
       } else {
@@ -453,8 +477,8 @@ public:
 
       auto *dt_n = new Cell("Diff type");
       auto *dt_v = new Cell(cstr_from_difftype(diff.diff_type));
-      TreeValue injected = diff.diff_type;
-      dt_v->setData(QVariant::fromStdVariant(injected));
+      DiffType *dt_ptr = &diff.diff_type;
+      dt_v->setData(PACK(dt_ptr));
 
       QBrush brush(qcolor_from_difftype(diff.diff_type));
       // QFont font; font.setBold(true); t_difftype->setFont(1, font);
@@ -514,33 +538,44 @@ struct KVTreeViewDelegate : public QStyledItemDelegate {
     (void)option; // for now
     // note: QStyledItemDelegate::createEditor returns nullptr anyway
 
-    TreeValue val;
+    // TreeValue val;
     printf("createEditor called | getting item from index %d\n", index.row());
     // this can't work, the data is tree-like and the index has just a row ????
     QStandardItem *item = model->itemFromIndex(index);
     assert(item);
-    QVariant data = item->data();
+    QVariant qdata = item->data();
+    // XXX: really nasty, there must be some proper way
+    TreeValue data = *(TreeValue *) qdata.data();
 
     // another non-exhaustive dispatch
     if (0) {
-    } else if (get_if<DiffType>(&data)) {
+    } else if (std::holds_alternative<DiffType *>(data)) {
+      printf("seems like difftype to me\n");
       QComboBox *combo = new QComboBox(parent);
       for (const char *cs : difftype_cstrs) { combo->addItem(cs); }
       return combo;
-    } else if (get_if<std::string>(&data)) {
+    } else if (std::holds_alternative<std::string *>(data)) {
+      printf("seems like string to me\n");
       auto *lineEdit = new QLineEdit(parent);
       return lineEdit;
-    } else if (get_if<double>(&data)) {
+    } else if (std::holds_alternative<DoubleField>(data)) {
+      printf("seems like double to me\n");
+      auto ff = std::get<DoubleField>(data);
       auto *doubleSpinBox = new QDoubleSpinBox(parent);
+      doubleSpinBox->setSingleStep(ff.spinbox_normal_increment);
+      // TODO: I don't know how to deal with Shift here
+      doubleSpinBox->setDecimals(3);
       // -- this depends
       doubleSpinBox->setMaximum(10000);
       return doubleSpinBox;
-    } else if (get_if<uint32_t>(&data)) {
+    } else if (std::holds_alternative<uint32_t *>(data)) {
+      printf("seems like uint32_t to me\n");
       auto *spinBox = new QSpinBox(parent);
       // -- TODO set this to whatever Etterna supports as maximum
       spinBox->setMaximum(UINT32_MAX);
       return spinBox;
     } else {
+      printf("I have no idea what this is\n");
       // assert(false && "non-exhaustive variant");
       return nullptr; // for now
     }
