@@ -1,4 +1,3 @@
-#include <fstream>
 #include <string>
 using std::string;
 
@@ -6,13 +5,20 @@ using std::string;
 #include <sys/inotify.h>
 #include <unistd.h>
 
+// file reading
+#define C_FILEREAD
+#ifdef C_FILEREAD
+#include <err.h>
+#else
+#include <fstream>
+#endif
+
 #include "sm_parser.h"
 #include "qt_includes.h"
+void __please(){qt_includes_suppress_bogus_unused_warning=0;};
 
 #include "dumb_stdlib_linux.h"
 
-
-void __please(){suppress_the_spurious_include_warning=0;};
 
 QColor qcolor_from_difftype(DiffType dt)
 {
@@ -690,10 +696,32 @@ int main(int argc, char **argv) {
 
   // -- parse a sample smfile
   const char *path = "ext/Shannon's Theorem.sm";
+
+  // -- this is like the guy from the gymnastics meme
+  // ------------------------------------------
+  #ifdef C_FILEREAD
+  FILE *f = fopen(path, "r");
+  if (fseek(f, 0, SEEK_END) != 0) { err(EXIT_FAILURE, "fseek failed"); }
+  long ssize = ftell(f);
+  if (ssize < 0) { err(EXIT_FAILURE, "ftell failed"); }
+  fseek(f, 0, SEEK_SET);
+  size_t size = (size_t)ssize;
+  char *smfile_cstr = (char *)malloc((size+1) * (sizeof *smfile_cstr));
+  size_t read = fread(smfile_cstr, 1, size, f);
+  // printf("%ld\n", read); fflush(stdout);
+  assert(read == size);
+  fclose(f);
+  std::string smfile_str(smfile_cstr, size);
+  #else //----------------------------
   std::ifstream file(path);
   std::ostringstream ss;
   ss << file.rdbuf();
-  auto smfile_opt = smfile_from_string_opt(ss.str());
+  std::string smfile_str(ss.str());
+  #endif
+  // ------------------------------------------
+
+  // dumb reallocation
+  auto smfile_opt = smfile_from_string_opt(smfile_str);
 
   if (std::holds_alternative<SmFile>(smfile_opt)) {
     smfile = std::get<SmFile>(smfile_opt);

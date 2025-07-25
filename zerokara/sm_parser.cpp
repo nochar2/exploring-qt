@@ -11,8 +11,6 @@ using std::string;
 using std::string_view;
 using namespace std::string_literals;
 
-using Chrono::TimePoint;
-
 #define eprintf(...) fprintf(stderr, __VA_ARGS__)
 
 size_t Difficulty::total_note_rows() {
@@ -137,7 +135,7 @@ smfile_from_string_opt(string const& str)
 
       // auto te = std::chrono::system_clock::now();
       // auto us = std::chrono::duration_cast<std::chrono::microseconds>(te-tb).count();
-      TimePoint te = Chrono::system_clock::now();
+      auto te = Chrono::system_clock::now();
       auto us = Chrono::duration_cast<Chrono::microseconds>(te-tb).count();
       
       // std::print(stderr, "Parsed an SmFile in {} seconds", (double)us / 1000000.);

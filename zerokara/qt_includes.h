@@ -30,4 +30,4 @@
 
 #include <QColor>
 
-static int suppress_the_spurious_include_warning;
+static int qt_includes_suppress_bogus_unused_warning;
