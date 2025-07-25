@@ -1,24 +1,83 @@
+// @includes -----------------------------------------------------------------------------------------------------------------
 #include <string>
 using std::string;
+
+#include "sm_parser.h"
+#include "qt_includes.h"
+void __please(){qt_includes_suppress_bogus_unused_warning=0;};
 
 // reload hacks
 #include <sys/inotify.h>
 #include <unistd.h>
 
-// file reading
+// dumb C++ STL replacements, trying to make it compile faster
+#include "dumb_stdlib_linux.h"
 #define C_FILEREAD
 #ifdef C_FILEREAD
 #include <err.h>
 #else
 #include <fstream>
 #endif
+using namespace Qt::Literals::StringLiterals;
 
-#include "sm_parser.h"
-#include "qt_includes.h"
-void __please(){qt_includes_suppress_bogus_unused_warning=0;};
 
-#include "dumb_stdlib_linux.h"
+// @structures ----------------------------------------------------------------------------------------------------
+struct StatusBar : public QLabel { void redraw(); };
 
+struct NoteRowRects {
+  std::vector<QRectF> rects; // 0 up to 4
+  QColor color;
+};
+
+struct SmRelativePos {
+  int32_t measures = 0;
+  int32_t beats = 0;
+  double smticks = 0;
+
+  static SmRelativePos incremented_by(SmRelativePos pos, double how_many_smticks) {
+    pos.smticks += how_many_smticks;
+    if (pos.smticks < 0) {
+      double n_borrows_from_beats = std::ceil(-(pos.smticks / 48.));
+      pos.beats -= (int)n_borrows_from_beats;
+      pos.smticks += 48.0 * n_borrows_from_beats;
+      assert(pos.smticks >= 0);
+    }
+    if (pos.smticks >= 48.) {
+      pos.beats += (int)(pos.smticks / 48.);
+      pos.smticks = std::fmod(pos.smticks, 48.);
+      assert(pos.smticks < 48.);
+    }
+
+    if (pos.beats >= 4) {
+      pos.measures += pos.beats / 4;
+      pos.beats = pos.beats % 4;
+    } else if (pos.beats < 0) {
+      int n_borrows = ((-pos.beats + 3) / 4);
+      pos.measures -= n_borrows;
+      pos.beats += 4 * n_borrows;
+    }
+
+    // Try to cancel out floating point errors like .00...1 or .99...9
+    double deviation = pos.smticks - round(pos.smticks);
+    if (abs(deviation) < 0.0001) { pos.smticks -= deviation; }
+    return pos;
+  }
+  // again, this assumes 4/4 everywhere
+  double total_smticks() {
+    return this->measures * 192 + this->beats * 48 + this->smticks;
+  }
+};
+
+
+
+// @globals ---------------------------------------------------------------------------------------------------------------
+// these are wrong if we want multiple charts/diffs, but this is tremendously simpler to work with for now.
+SmFile smfile;
+SmRelativePos cur_chart_pos = {0};
+// let's say this means 16ths, again 4/4 yada yada
+int cur_snap_nths = 16;
+
+// @functions -----------------------------------------------------------------------------------------------------------
 
 QColor qcolor_from_difftype(DiffType dt)
 {
@@ -32,10 +91,6 @@ QColor qcolor_from_difftype(DiffType dt)
   }
   assert(false);
 }
-
-SmFile smfile;
-
-using namespace Qt::Literals::StringLiterals;
 
 const char *cstr_color_from_snap (int snap);
 
@@ -107,59 +162,31 @@ int sm_sane_snap_lower_than(int snap) {
   return 1;
 }
 
-struct NoteRowRects {
-  std::vector<QRectF> rects; // 0 up to 4
-  QColor color;
-};
 
 
 // who cares, everyone uses 4/4
 double smticks_in_1_(int subdiv){return 192./subdiv;};
 
 
-struct SmRelativePos {
-  int32_t measures = 0;
-  int32_t beats = 0;
-  double smticks = 0;
+void StatusBar::redraw() {
+  this->setText(
+    QString("Measure %1, beat %2, smtick %3  |  "
+            "Snap <span style='color: %4; font-weight: 600;'>%5</span>")
+      .arg(cur_chart_pos.measures)
+      .arg(cur_chart_pos.beats)
+      .arg(QString::number(cur_chart_pos.smticks, 'g', 4))
+      .arg(cstr_color_from_snap(cur_snap_nths))
+      .arg(cur_snap_nths)
+  );
+}
 
-  static SmRelativePos incremented_by(SmRelativePos pos, double how_many_smticks) {
-    pos.smticks += how_many_smticks;
-    if (pos.smticks < 0) {
-      double n_borrows_from_beats = std::ceil(-(pos.smticks / 48.));
-      pos.beats -= (int)n_borrows_from_beats;
-      pos.smticks += 48.0 * n_borrows_from_beats;
-      assert(pos.smticks >= 0);
-    }
-    if (pos.smticks >= 48.) {
-      pos.beats += (int)(pos.smticks / 48.);
-      pos.smticks = std::fmod(pos.smticks, 48.);
-      assert(pos.smticks < 48.);
-    }
 
-    if (pos.beats >= 4) {
-      pos.measures += pos.beats / 4;
-      pos.beats = pos.beats % 4;
-    } else if (pos.beats < 0) {
-      int n_borrows = ((-pos.beats + 3) / 4);
-      pos.measures -= n_borrows;
-      pos.beats += 4 * n_borrows;
-    }
+// -- FIXME: most of this is probably kind of wrong. The data should be stored in some central place,
+// -- and then all widgets should just show the data in their own way. This way, it's really prone
+// -- to data duplication / need for pointer hacks / not knowing where the data actually are
+struct NoteDisplayWidget : public QWidget {
+  StatusBar *status_bar;
 
-    // Try to cancel out floating point errors like .00...1 or .99...9
-    double deviation = pos.smticks - round(pos.smticks);
-    if (abs(deviation) < 0.0001) { pos.smticks -= deviation; }
-    return pos;
-  }
-  // again, this assumes 4/4 everywhere
-  double total_smticks() {
-    return this->measures * 192 + this->beats * 48 + this->smticks;
-  }
-};
-
-class NoteDisplayWidget : public QWidget {
-Q_OBJECT
-
-public:
   bool downscroll = false;
   int cmod = 400;
   const double PX_VISUAL_OFFSET_FROM_HORIZ_LINE = 30.0;
@@ -167,11 +194,7 @@ public:
 
   // instead of incrementing / decrementing pixel offset directly,
   // keep track of the precise relative position and then recalculate the pixels on scroll
-  SmRelativePos cur_chart_pos = {0};
   
-  // let's say this means 16ths, again 4/4 yada yada
-  int current_snap_nths = 16;
-
 
   // -- TODO: yes I know I rely on a single bpm for now
   double px_per_smtick() {
@@ -181,7 +204,7 @@ public:
     return secs_per_smtick * cmod;
   }
   double px_per_current_snap() {
-    return 192.0 / current_snap_nths * px_per_smtick();
+    return 192.0 / cur_snap_nths * px_per_smtick();
   }
 
 
@@ -192,9 +215,6 @@ public:
     px_of_measure_zero = PX_VISUAL_OFFSET_FROM_HORIZ_LINE - px_per_smtick() * cur_chart_pos.total_smticks();
     this->update();
   }
-  
-  signals:
-  void positionChanged(SmRelativePos new_pos, int snap);
   
 
   protected:
@@ -211,31 +231,36 @@ public:
 
     if (modifiers & Qt::ControlModifier) { // change snap
       if (event->angleDelta().ry() < 0) {
-        current_snap_nths =
+        cur_snap_nths =
           (modifiers & Qt::ShiftModifier)
-          ? std::max(current_snap_nths-1, 1)
-          : sm_sane_snap_lower_than(current_snap_nths)
+          ? std::max(cur_snap_nths-1, 1)
+          : sm_sane_snap_lower_than(cur_snap_nths)
         ;
       } else {
-        current_snap_nths =
+        cur_snap_nths =
           (modifiers & Qt::ShiftModifier)
-          ? std::min(current_snap_nths+1, 192)
-          : sm_sane_snap_higher_than(current_snap_nths)
+          ? std::min(cur_snap_nths+1, 192)
+          : sm_sane_snap_higher_than(cur_snap_nths)
         ;
       }
     } else { // move
       if ((event->angleDelta().ry() < 0) ^ !downscroll) {
-        new_pos = SmRelativePos::incremented_by(cur_chart_pos, -smticks_in_1_(current_snap_nths));
+        new_pos = SmRelativePos::incremented_by(cur_chart_pos, -smticks_in_1_(cur_snap_nths));
       } else {
-        new_pos = SmRelativePos::incremented_by(cur_chart_pos, +smticks_in_1_(current_snap_nths));
+        new_pos = SmRelativePos::incremented_by(cur_chart_pos, +smticks_in_1_(cur_snap_nths));
       }
     }
     // printf("pos after: %d %d %lg\n", new_pos.measures, new_pos.beats, new_pos.smticks);
     cur_chart_pos = (new_pos.measures < 0) ? (SmRelativePos){0} : new_pos;
 
     // printf("raw smticks: %d\n", chart_pos.raw_smticks());
+    // 
+    // -- FIXMEEEEEEEEEEEEEEEE: we need to get the pointer to status_bar from somewhere,
+    // -- but that reeks with spaghetti. Or I can store a list of magical function pointers
+    // -- somewhere. I don't know of a good idea to resolve this
+    status_bar->redraw();
     this->update();
-    emit positionChanged(cur_chart_pos, current_snap_nths);
+    // positionChanged(cur_chart_pos, cur_snap_nths);
   };
 
   void paintEvent(QPaintEvent */*event*/) override {
@@ -285,7 +310,7 @@ public:
         //        s->measures, s->beats, s->smticks, y_distance);
 
         if (y_distance < 0.0) {
-          *s = SmRelativePos::incremented_by(*s, 192.0/current_snap_nths);
+          *s = SmRelativePos::incremented_by(*s, 192.0/cur_snap_nths);
           continue;
         }
         if (y_distance > this->height()) { break; }
@@ -311,7 +336,7 @@ public:
         auto snap_line = QLineF(left_start, y, left_start + 4 * note_width, y);
         painter.drawLine(snap_line);
 
-        *s = SmRelativePos::incremented_by(*s, 192.0/current_snap_nths);
+        *s = SmRelativePos::incremented_by(*s, 192.0/cur_snap_nths);
       }
     }
 
@@ -398,7 +423,6 @@ struct KVFields     { std::vector<TimeKV> *data; SmDoubleKind kind; };
 using TreeValue = std::variant<
   std::string *
   , DoubleField
-  // , std::vector<Difficulty> *
   , DiffType
   , uint32_t
   , SmRelativePos // measure
@@ -410,15 +434,16 @@ Q_DECLARE_METATYPE(TreeValue);
 struct TreeItem { QString key; TreeValue value; };
 
 struct KVTreeModel : public QStandardItemModel {
+  // Q_OBJECT
 
-  Q_OBJECT
 public:
 
   // so, idk, this should be modified on change but idk how to pass the pointers
   // through hell and back and contorted through QVariants which don't like double * for some reason
-  SmFile &smfile;
+  // SmFile &smfile;
 
-  KVTreeModel(SmFile &smfile) : QStandardItemModel(), smfile(smfile) {
+  // you need vtable for this idk
+  KVTreeModel() : QStandardItemModel() {
     redraw_yourself();
   }
 
@@ -658,7 +683,7 @@ struct KVTreeViewDelegate : public QStyledItemDelegate {
         case SmDoubleKind::Bpm:
           doubleSpinBox->setSingleStep(1);
           doubleSpinBox->setDecimals(2);
-          doubleSpinBox->setMinimum(1);     // idk what negbpm really means
+          doubleSpinBox->setMinimum(1);     // don't care about negbpms
           doubleSpinBox->setMaximum(10000); // -- this depends
           break;
       }
@@ -743,7 +768,7 @@ int main(int argc, char **argv) {
   layout_.addWidget(&resizable_layout);
 
   // -- tree model of the whole file for a tree widget
-  KVTreeModel        smfile_model(smfile);
+  KVTreeModel        smfile_model;
   KVTreeViewDelegate smfile_view_delegate(&smfile_model);
   smfile_view_delegate.model = &smfile_model;
 
@@ -770,29 +795,13 @@ int main(int argc, char **argv) {
       preview_actual.setPalette(pal);
     preview_tile.addWidget(&preview_actual, 8);
 
+    StatusBar status_bar;
+    // so I can draw status_bar.redraw() inside NoteDisplayWidget later
+    // spaghetti, I know, but don't have a much better idea
+    preview_actual.status_bar = &status_bar;
 
-    QLabel status_bar;
-    auto redraw_statusbar =
-      [&](SmRelativePos pos, int snap){status_bar.setText(
-        QString("Measure %1, beat %2, smtick %3  |  "
-                "Snap <span style='color: %4; font-weight: 600;'>%5</span>")
-          .arg(pos.measures)
-          .arg(pos.beats)
-          .arg(QString::number(pos.smticks, 'g', 4))
-          .arg(cstr_color_from_snap(snap))
-          .arg(snap)
-      );};
-    // set initial value
-    redraw_statusbar(preview_actual.cur_chart_pos, preview_actual.current_snap_nths);
+    status_bar.redraw();
 
-    QObject::connect(
-      &preview_actual,
-      &NoteDisplayWidget::positionChanged,
-      [&](SmRelativePos pos, int snap){
-        redraw_statusbar(pos, snap);
-        preview_actual.update();
-      }
-    );
 
     QObject::connect(
       tree_view,
@@ -812,17 +821,14 @@ int main(int argc, char **argv) {
           NoteRow row = std::get<NoteRow>(row_var);
           // NOTE: maybe put SmRelativePos into the sm_parser already
           SmRelativePos new_pos = {(int32_t)row.measure, (int32_t)row.beat, (double)row.smticks};
+          cur_chart_pos = new_pos;
 
-          // XXX: this really shouldn't be three statements like this
-          preview_actual.cur_chart_pos = new_pos;
-          // preview_actual.update();
-          emit preview_actual.positionChanged(new_pos, preview_actual.current_snap_nths);
         } else if (std::holds_alternative<SmRelativePos>(row_var)) { // clicked on a measure
           auto new_pos = std::get<SmRelativePos>(row_var);
-          preview_actual.cur_chart_pos = new_pos;
-          // preview_actual.update();
-          emit preview_actual.positionChanged(new_pos, preview_actual.current_snap_nths);
+          cur_chart_pos = new_pos;
         }
+        status_bar.redraw();
+        preview_actual.update();
       }
     );
 
@@ -872,5 +878,3 @@ int main(int argc, char **argv) {
   // tree = nullptr;
   return ret;
 }
-
-#include "zerokara.moc"
