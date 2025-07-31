@@ -1,0 +1,18 @@
+
+full compilation is now close to 12 seconds
+- precompiled headers / including .cpp (forgot) bring it only to 9.5s
+- I have already spent time optimizing the STL headers
+	- replacing <array> and <chrono>: 11.6 s -> 11.3 s
+		- still need to implement this on windows too then
+	- replacing <fstream>: idk the times are inconsistent, still 11-11.5 s
+
+	- replacing the stdlib headers actually gains you nothing in the Qt
+	compilation unit; g++ -E gives you the same 150k lines.
+	- <QtWidgets> is 300k lines
+	
+- zerokara.moc is 100k lines of code
+	- GONE. Now it's still around 10.7 s
+
+
+- clangd is completely gone it seems, not sure if by my fault
+	- somehow fixed?

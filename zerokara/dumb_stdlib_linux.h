@@ -18,6 +18,25 @@
 #define Chrono std::chrono
 #else
 
+#include <string>
+
+// avoids <fstream>
+#include <err.h>
+inline std::string read_entire_file(const char *path) {
+  FILE *f = fopen(path, "r");
+  if (fseek(f, 0, SEEK_END) != 0) { err(EXIT_FAILURE, "fseek failed"); }
+  long ssize = ftell(f);
+  if (ssize < 0) { err(EXIT_FAILURE, "ftell failed"); }
+  fseek(f, 0, SEEK_SET);
+  size_t size = (size_t)ssize;
+  char *file_cstr = (char *)malloc((size+1) * (sizeof *file_cstr));
+  size_t read = fread(file_cstr, 1, size, f);
+  // printf("%ld\n", read); fflush(stdout);
+  assert(read == size);
+  fclose(f);
+  return std::string(file_cstr, size);
+}
+
 
 inline void check_index(size_t idx, size_t n) {
   if (idx >= n) {

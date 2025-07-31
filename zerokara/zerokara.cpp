@@ -1,10 +1,13 @@
 // @includes -----------------------------------------------------------------------------------------------------------------
+
 #include <string>
 using std::string;
 
 #include "sm_parser.h"
 #include "qt_includes.h"
 void __please(){qt_includes_suppress_bogus_unused_warning=0;};
+using namespace Qt::Literals::StringLiterals;
+
 
 // reload hacks
 #include <sys/inotify.h>
@@ -12,17 +15,28 @@ void __please(){qt_includes_suppress_bogus_unused_warning=0;};
 
 // dumb C++ STL replacements, trying to make it compile faster
 #include "dumb_stdlib_linux.h"
-#define C_FILEREAD
-#ifdef C_FILEREAD
-#include <err.h>
-#else
-#include <fstream>
-#endif
-using namespace Qt::Literals::StringLiterals;
 
+#pragma GCC poison printf
+#define eprintf(...) fprintf(stderr, __VA_ARGS__)
 
 // @structures ----------------------------------------------------------------------------------------------------
-struct StatusBar : public QLabel { void redraw(); };
+struct StatusBar : public QWidget {
+  QHBoxLayout container;
+  QLabel label_pos;
+  QPushButton btn_reset_weird_snap;
+  QLabel label_snap;
+
+  StatusBar(QWidget *parent);
+
+  // StatusBar(QWidget *parent) {
+  //   container.setParent(parent);
+  // }
+  // void show()  {
+  //   this->label.show();
+  //   this->reset_weird_snap.show();
+  // }
+  void redraw();
+};
 
 struct NoteRowRects {
   std::vector<QRectF> rects; // 0 up to 4
@@ -59,7 +73,7 @@ struct SmRelativePos {
 
     // Try to cancel out floating point errors like .00...1 or .99...9
     double deviation = pos.smticks - round(pos.smticks);
-    if (abs(deviation) < 0.0001) { pos.smticks -= deviation; }
+    if (fabs(deviation) < 0.0001) { pos.smticks -= deviation; }
     return pos;
   }
   // again, this assumes 4/4 everywhere
@@ -78,6 +92,27 @@ SmRelativePos cur_chart_pos = {0};
 int cur_snap_nths = 16;
 
 // @functions -----------------------------------------------------------------------------------------------------------
+
+StatusBar::StatusBar(QWidget *parent) : QWidget(parent) {
+  container.addWidget(&label_pos, 0);
+  container.addWidget(&btn_reset_weird_snap, 0);
+  container.addWidget(&label_snap, 0);
+  // container.setParent(this);
+  this->setLayout(&container);
+  this->setParent(parent);
+  QObject::connect(
+    &this->btn_reset_weird_snap,
+    &QPushButton::clicked,
+    this,
+    [&](){
+      cur_chart_pos.smticks = 0;
+      /* TODO redraw a bunch of stuff */
+      this->redraw();
+    }
+  );
+  this->redraw();
+}
+
 
 QColor qcolor_from_difftype(DiffType dt)
 {
@@ -122,6 +157,18 @@ const char *cstr_from_smticks(double smticks) {
   if (std::fmod(smticks, 48/8) == 0) return "orange";
   if (std::fmod(smticks, 48/12) == 0) return "deepskyblue";
   return "grey";
+}
+
+bool smtick_is_sane(double smtick) {
+  // -- false on gray notes
+  // for (auto div : {1,2,3,4,6,8,12}) {
+  //   if (std::fmod(smtick, 48/div) == 0.) return true;
+  // }
+  // return false;
+
+  // -- false if you can no longer step over red notes
+  // -- (includes stuff like offbeat triplets)
+  return std::fmod(smtick, 192/cur_snap_nths) == 0;
 }
 
 // this is for the Snap xx highlight
@@ -169,15 +216,31 @@ double smticks_in_1_(int subdiv){return 192./subdiv;};
 
 
 void StatusBar::redraw() {
-  this->setText(
-    QString("Measure %1, beat %2, smtick %3  |  "
-            "Snap <span style='color: %4; font-weight: 600;'>%5</span>")
-      .arg(cur_chart_pos.measures)
-      .arg(cur_chart_pos.beats)
-      .arg(QString::number(cur_chart_pos.smticks, 'g', 4))
-      .arg(cstr_color_from_snap(cur_snap_nths))
-      .arg(cur_snap_nths)
+  this->label_pos.setText(
+    QString("Measure %1, beat %2, smtick %3")
+    .arg(cur_chart_pos.measures)
+    .arg(cur_chart_pos.beats)
+    .arg(QString::number(cur_chart_pos.smticks, 'g', 4))
   );
+  this->btn_reset_weird_snap.setText("Reset");
+  this->btn_reset_weird_snap.setStyleSheet("padding: 0.4em;");
+  // getters/setters were a mistake...
+  QFont font = this->btn_reset_weird_snap.font();
+  font.setPointSize(8);
+  this->btn_reset_weird_snap.setFont(font);
+
+  this->label_snap.setText(
+    QString("| Snap <span style='color: %1; font-weight: 600;'>%2</span>")
+    .arg(cstr_color_from_snap(cur_snap_nths))
+    .arg(cur_snap_nths)
+  );
+
+  // -- for now comment out
+  if (!smtick_is_sane(cur_chart_pos.smticks)) {
+    this->btn_reset_weird_snap.show();
+  } else {
+    this->btn_reset_weird_snap.hide();
+  }
 }
 
 
@@ -392,7 +455,7 @@ __attribute__((noreturn))
 void *exec_yourself(void *arg) {
   int inotify_fd = *(int *)arg;
   char dontcare[1];
-  printf("\nI: The app will be restarted when the ./zerokara binary changes.\n");
+  eprintf("\nI: The app will be restarted when the ./zerokara binary changes.\n");
   while(1) { // -- spam while the binary is momentarily gone
     ssize_t read_bytes = read(inotify_fd, dontcare, 1);             (void)(read_bytes);
     int minusone_on_fail = execl("./zerokara", "./zerokara", NULL); (void)(minusone_on_fail);
@@ -640,10 +703,10 @@ struct KVTreeViewDelegate : public QStyledItemDelegate {
     // return QStyledItemDelegate::createEditor(parent, option, index);
 
     // TreeValue val;
-    printf("createEditor called | getting item from index %d\n", index.row());
+    eprintf("createEditor called | getting item from index %d\n", index.row());
     // this can't work, the data is tree-like and the index has just a row ????
     QStandardItem *item = model->itemFromIndex(index);
-    printf("it has %d columns, and ", item->columnCount());
+    eprintf("it has %d columns, and ", item->columnCount());
 
     assert(item);
     QVariant qdata = item->data();
@@ -653,16 +716,16 @@ struct KVTreeViewDelegate : public QStyledItemDelegate {
     // another non-exhaustive dispatch
     if (0) {
     } else if (std::holds_alternative<DiffType>(data)) {
-      printf("seems like difftype to me\n");
+      eprintf("seems like difftype to me\n");
       QComboBox *combo = new QComboBox(parent);
       for (const char *cs : difftype_cstrs) { combo->addItem(cs); }
       return combo;
     } else if (std::holds_alternative<std::string *>(data)) {
-      printf("seems like string to me\n");
+      eprintf("seems like string to me\n");
       auto *lineEdit = new QLineEdit(parent);
       return lineEdit;
     } else if (std::holds_alternative<DoubleField>(data)) {
-      printf("seems like double to me\n");
+      eprintf("seems like double to me\n");
       auto ff = std::get<DoubleField>(data);
       auto *doubleSpinBox = new QDoubleSpinBox(parent);
 
@@ -689,13 +752,13 @@ struct KVTreeViewDelegate : public QStyledItemDelegate {
       }
       return doubleSpinBox;
     } else if (std::holds_alternative<uint32_t>(data)) {
-      printf("seems like uint32_t to me\n");
+      eprintf("seems like uint32_t to me\n");
       auto *spinBox = new QSpinBox(parent);
       // -- TODO set this to whatever Etterna supports as maximum
       spinBox->setMaximum(UINT32_MAX);
       return spinBox;
     } else {
-      printf("I have no idea what this is\n");
+      eprintf("I have no idea what this is\n");
       // assert(false && "non-exhaustive variant");
       return nullptr; // for now
     }
@@ -722,37 +785,14 @@ int main(int argc, char **argv) {
   // -- parse a sample smfile
   const char *path = "ext/Shannon's Theorem.sm";
 
-  // -- this is like the guy from the gymnastics meme
-  // ------------------------------------------
-  #ifdef C_FILEREAD
-  FILE *f = fopen(path, "r");
-  if (fseek(f, 0, SEEK_END) != 0) { err(EXIT_FAILURE, "fseek failed"); }
-  long ssize = ftell(f);
-  if (ssize < 0) { err(EXIT_FAILURE, "ftell failed"); }
-  fseek(f, 0, SEEK_SET);
-  size_t size = (size_t)ssize;
-  char *smfile_cstr = (char *)malloc((size+1) * (sizeof *smfile_cstr));
-  size_t read = fread(smfile_cstr, 1, size, f);
-  // printf("%ld\n", read); fflush(stdout);
-  assert(read == size);
-  fclose(f);
-  std::string smfile_str(smfile_cstr, size);
-  #else //----------------------------
-  std::ifstream file(path);
-  std::ostringstream ss;
-  ss << file.rdbuf();
-  std::string smfile_str(ss.str());
-  #endif
-  // ------------------------------------------
-
-  // dumb reallocation
+  std::string smfile_str = read_entire_file(path);
   auto smfile_opt = smfile_from_string_opt(smfile_str);
 
   if (std::holds_alternative<SmFile>(smfile_opt)) {
     smfile = std::get<SmFile>(smfile_opt);
   } else {
     auto err = std::get<SmParseError>(smfile_opt);
-    printf("%s\n", err.msg.c_str());
+    eprintf("%s\n", err.msg.c_str());
     assert(false);
   }
 
@@ -779,7 +819,6 @@ int main(int argc, char **argv) {
   tree_view->setHeaderHidden(true);
   tree_view->expandToDepth(1); // hacky :( but luckily works here
   tree_view->resizeColumnToContents(0);
-  tree_view->show();
   resizable_layout.addWidget(tree_view);
 
   // -- You can't scope these, they need to live somehow (on stack or heap).
@@ -795,13 +834,21 @@ int main(int argc, char **argv) {
       preview_actual.setPalette(pal);
     preview_tile.addWidget(&preview_actual, 8);
 
-    StatusBar status_bar;
-    // so I can draw status_bar.redraw() inside NoteDisplayWidget later
-    // spaghetti, I know, but don't have a much better idea
+    // -- this shows up
+    // QLabel aaaaa;
+    // aaaaa.setText("aaaaaaaaaaaaaaaaaaa");
+    // preview_tile.addWidget(&aaaaa, 0);
+    
+    // -- this doesn't
+    QFrame why;
+    StatusBar status_bar(&why); // wrong, but let's see what happens
+    preview_tile.addWidget(&why, 0);
+    
+    // -- so I can draw status_bar.redraw() inside NoteDisplayWidget later;
+    // -- spaghetti, I know, but don't have a much better idea rn
     preview_actual.status_bar = &status_bar;
 
-    status_bar.redraw();
-
+    // -- .show() spawns it in a new window, we don't want that
 
     QObject::connect(
       tree_view,
@@ -820,7 +867,8 @@ int main(int argc, char **argv) {
         } else if (std::holds_alternative<NoteRow>(row_var)) { // clicked on a noterow
           NoteRow row = std::get<NoteRow>(row_var);
           // NOTE: maybe put SmRelativePos into the sm_parser already
-          SmRelativePos new_pos = {(int32_t)row.measure, (int32_t)row.beat, (double)row.smticks};
+          SmRelativePos new_pos
+            = {(int32_t)row.measure, (int32_t)row.beat, (double)row.smticks};
           cur_chart_pos = new_pos;
 
         } else if (std::holds_alternative<SmRelativePos>(row_var)) { // clicked on a measure
@@ -868,10 +916,12 @@ int main(int argc, char **argv) {
         preview_actual.onCmodChange(cmod_spinbox.value());
       preview_controls.addWidget(&cmod_spinbox, 1);
       preview_controls.setAlignment(&cmod_spinbox, Qt::AlignCenter);
-    preview_tile.addLayout(&preview_controls, 1);
+    preview_tile.addLayout(&preview_controls, 0);
 
   resizable_layout.addWidget(&right_chunk);
 
+  // -- TODO at some point, use QMainWindow
+  // setCentralWidget(w_tabs_root);
   w_tabs_root.show();
   int ret = app.exec();
   // delete tree;

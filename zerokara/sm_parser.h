@@ -1,11 +1,13 @@
 #ifndef SM_PARSER_H
 #define SM_PARSER_H
-#include <string>
 #include <cstdint>
 // #include <array>
 // #include <vector>
 #include <variant>
 #include "dumb_stdlib_linux.h"
+
+#include <string>
+// class std::string;
 
 extern const std::string CHART;
 

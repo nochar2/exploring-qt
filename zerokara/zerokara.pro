@@ -15,7 +15,7 @@ CONFIG = qt import_qpa_plugin \
 	# precompile_header
 # PRECOMPILED_HEADER = precompiled.h
 
-QMAKE_CXXFLAGS_DEBUG += -Wconversion
+# QMAKE_CXXFLAGS_DEBUG += -Wconversion
 
 QT = widgets                  # (kind of implies `core gui` somehow)
 

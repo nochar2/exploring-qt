@@ -16,6 +16,7 @@
 #include <QTabWidget>
 #include <QTextEdit>
 #include <QWindow>
+#include <QPushButton>
 
 // painter stuff
 #include <QPainter>
