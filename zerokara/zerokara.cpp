@@ -19,8 +19,32 @@ using namespace Qt::Literals::StringLiterals;
 #pragma GCC poison printf
 #define eprintf(...) fprintf(stderr, __VA_ARGS__)
 
+struct NoteDisplayWidget;
+struct StatusBar;
+
 // @structures ----------------------------------------------------------------------------------------------------
+struct NoteDisplayWidget : public QWidget {
+  StatusBar *status_bar;
+
+  bool downscroll = false;
+  int cmod = 400;
+  const double PX_VISUAL_OFFSET_FROM_HORIZ_LINE = 30.0;
+  double px_of_measure_zero = PX_VISUAL_OFFSET_FROM_HORIZ_LINE;
+
+  // here for now
+  double px_per_smtick();
+  double px_per_current_snap();
+
+  void redraw();
+  void wheelEvent(QWheelEvent *event) override;
+  void paintEvent(QPaintEvent *event) override;
+  void onCmodChange(int value);
+  void onDownscrollChange(Qt::CheckState state);
+};
+
 struct StatusBar : public QWidget {
+  NoteDisplayWidget *note_display_widget;
+
   QHBoxLayout container;
   QLabel label_pos;
   QPushButton btn_reset_weird_snap;
@@ -108,6 +132,7 @@ StatusBar::StatusBar(QWidget *parent) : QWidget(parent) {
       cur_chart_pos.smticks = 0;
       /* TODO redraw a bunch of stuff */
       this->redraw();
+      this->note_display_widget->update();
     }
   );
   this->redraw();
@@ -222,12 +247,16 @@ void StatusBar::redraw() {
     .arg(cur_chart_pos.beats)
     .arg(QString::number(cur_chart_pos.smticks, 'g', 4))
   );
-  this->btn_reset_weird_snap.setText("Reset");
-  this->btn_reset_weird_snap.setStyleSheet("padding: 0.4em;");
-  // getters/setters were a mistake...
-  QFont font = this->btn_reset_weird_snap.font();
-  font.setPointSize(8);
-  this->btn_reset_weird_snap.setFont(font);
+
+  this->btn_reset_weird_snap.setText("(Reset)");
+  // -- this doesn't work, and I'm doing the styleditemdelegate dance again
+  // this->btn_reset_weird_snap.setText("(<span style='text-decoration: underline;'>Reset</span>)");
+  this->btn_reset_weird_snap.setStyleSheet("margin: 0em; border: 0em; font-weight: 600;");
+
+  // -- getters/setters were a mistake...
+  // QFont font = this->btn_reset_weird_snap.font();
+  // font.setPointSize(8);
+  // this->btn_reset_weird_snap.setFont(font);
 
   this->label_snap.setText(
     QString("| Snap <span style='color: %1; font-weight: 600;'>%2</span>")
@@ -247,208 +276,206 @@ void StatusBar::redraw() {
 // -- FIXME: most of this is probably kind of wrong. The data should be stored in some central place,
 // -- and then all widgets should just show the data in their own way. This way, it's really prone
 // -- to data duplication / need for pointer hacks / not knowing where the data actually are
-struct NoteDisplayWidget : public QWidget {
-  StatusBar *status_bar;
-
-  bool downscroll = false;
-  int cmod = 400;
-  const double PX_VISUAL_OFFSET_FROM_HORIZ_LINE = 30.0;
-  double px_of_measure_zero = PX_VISUAL_OFFSET_FROM_HORIZ_LINE;
+// -- (maybe I fixed some of this?)
 
   // instead of incrementing / decrementing pixel offset directly,
   // keep track of the precise relative position and then recalculate the pixels on scroll
   
 
-  // -- TODO: yes I know I rely on a single bpm for now
-  double px_per_smtick() {
-    double bpm = smfile.bpms[0].value;
-    double secs_per_beat = 60./bpm;
-    double secs_per_smtick = secs_per_beat / 48.;
-    return secs_per_smtick * cmod;
-  }
-  double px_per_current_snap() {
-    return 192.0 / cur_snap_nths * px_per_smtick();
-  }
+// -- TODO: yes I know I rely on a single bpm for now
+double NoteDisplayWidget::px_per_smtick() {
+  double bpm = smfile.bpms[0].value;
+  double secs_per_beat = 60./bpm;
+  double secs_per_smtick = secs_per_beat / 48.;
+  return secs_per_smtick * cmod;
+}
+double NoteDisplayWidget::px_per_current_snap() {
+  return 192.0 / cur_snap_nths * px_per_smtick();
+}
 
 
-  public:
-  void onDownscrollCheckboxClick(Qt::CheckState ds_state) { this->downscroll = ds_state == Qt::Checked; this->update(); }
-  void onCmodChange(int value) {
-    this->cmod = value;
-    px_of_measure_zero = PX_VISUAL_OFFSET_FROM_HORIZ_LINE - px_per_smtick() * cur_chart_pos.total_smticks();
-    this->update();
-  }
+// void NoteDisplayWidget::onDownscrollCheckboxClick(Qt::CheckState ds_state) {
+// }
+
+void NoteDisplayWidget::onCmodChange(int value) {
+  this->cmod = value;
+  px_of_measure_zero = PX_VISUAL_OFFSET_FROM_HORIZ_LINE - px_per_smtick() * cur_chart_pos.total_smticks();
+  this->update();
+}
+void NoteDisplayWidget::onDownscrollChange(Qt::CheckState state) {
+  this->downscroll = state == Qt::Checked; this->update();
+}
+
   
 
-  protected:
   /// On mouse wheel scroll:
   /// no modifiers -> scroll,
   /// ctrl -> change snap,
   /// ctrl+shift -> change snap (fine)
-  void wheelEvent(QWheelEvent *event) override {
-    auto modifiers = QGuiApplication::keyboardModifiers();
-    SmRelativePos new_pos = cur_chart_pos;
+void NoteDisplayWidget::wheelEvent(QWheelEvent *event) {
+  auto modifiers = QGuiApplication::keyboardModifiers();
+  SmRelativePos new_pos = cur_chart_pos;
 
-    // printf("pos before: %d %d %lf\n",
-    //        cur_chart_pos.measures, cur_chart_pos.beats, cur_chart_pos.smticks);
+  // printf("pos before: %d %d %lf\n",
+  //        cur_chart_pos.measures, cur_chart_pos.beats, cur_chart_pos.smticks);
 
-    if (modifiers & Qt::ControlModifier) { // change snap
-      if (event->angleDelta().ry() < 0) {
-        cur_snap_nths =
-          (modifiers & Qt::ShiftModifier)
-          ? std::max(cur_snap_nths-1, 1)
-          : sm_sane_snap_lower_than(cur_snap_nths)
-        ;
-      } else {
-        cur_snap_nths =
-          (modifiers & Qt::ShiftModifier)
-          ? std::min(cur_snap_nths+1, 192)
-          : sm_sane_snap_higher_than(cur_snap_nths)
-        ;
-      }
-    } else { // move
-      if ((event->angleDelta().ry() < 0) ^ !downscroll) {
-        new_pos = SmRelativePos::incremented_by(cur_chart_pos, -smticks_in_1_(cur_snap_nths));
-      } else {
-        new_pos = SmRelativePos::incremented_by(cur_chart_pos, +smticks_in_1_(cur_snap_nths));
-      }
+  if (modifiers & Qt::ControlModifier) { // change snap
+    if (event->angleDelta().ry() < 0) {
+      cur_snap_nths =
+        (modifiers & Qt::ShiftModifier)
+        ? std::max(cur_snap_nths-1, 1)
+        : sm_sane_snap_lower_than(cur_snap_nths)
+      ;
+    } else {
+      cur_snap_nths =
+        (modifiers & Qt::ShiftModifier)
+        ? std::min(cur_snap_nths+1, 192)
+        : sm_sane_snap_higher_than(cur_snap_nths)
+      ;
     }
-    // printf("pos after: %d %d %lg\n", new_pos.measures, new_pos.beats, new_pos.smticks);
-    cur_chart_pos = (new_pos.measures < 0) ? (SmRelativePos){0} : new_pos;
-
-    // printf("raw smticks: %d\n", chart_pos.raw_smticks());
-    // 
-    // -- FIXMEEEEEEEEEEEEEEEE: we need to get the pointer to status_bar from somewhere,
-    // -- but that reeks with spaghetti. Or I can store a list of magical function pointers
-    // -- somewhere. I don't know of a good idea to resolve this
-    status_bar->redraw();
-    this->update();
-    // positionChanged(cur_chart_pos, cur_snap_nths);
-  };
-
-  void paintEvent(QPaintEvent */*event*/) override {
-    QPainter painter(this);
-    painter.setRenderHint(QPainter::Antialiasing);
-
-    // visually scroll to desired place
-    px_of_measure_zero = PX_VISUAL_OFFSET_FROM_HORIZ_LINE - px_per_smtick() * cur_chart_pos.total_smticks();
-
-    int32_t note_width  = 60;
-    int32_t note_height = 20;
-    int32_t px_judge_line_off = 30;
-    int32_t left_start = this->width() / 2 - (int32_t)(2 * note_width); // for centering
-
-    QPen pen;
- 
-    // draw judge line
-    {
-      auto judge_line = QLine(0, px_judge_line_off, this->width()-1, px_judge_line_off);
-      if (downscroll) {
-        int new_y = this->height() - judge_line.y1();
-        judge_line.setLine(0, new_y, this->width()-1, new_y);
-      }
-      pen.setWidth(5); pen.setColor(Qt::white); painter.setPen(pen);
-      painter.drawLine(judge_line);
-    }
-
-    // draw corner beams around the left and right edge of playfield
-    {
-      auto left_edge  = QLineF(left_start,              0, left_start,               this->height()-1);
-      auto right_edge = QLineF(left_start+note_width*4, 0, left_start+note_width*4,  this->height()-1);
-      pen.setWidth(2); pen.setColor(Qt::gray); painter.setPen(pen);
-      painter.drawLine(left_edge);
-      painter.drawLine(right_edge);
-    }
-
-    // draw snaplines, starting from previous measure
-    {
-      SmRelativePos snap_of_this_snapline = cur_chart_pos;
-      auto s = &snap_of_this_snapline;
-      s->measures -= 1;
-
-      // printf("---------------\n");
-      for (int i = 0; i < 300; i++) {
-        double y_distance = px_of_measure_zero + s->total_smticks() * px_per_smtick();
-        // printf("snap of this snapline: %d:%d:%lg, which translates to %lg px\n",
-        //        s->measures, s->beats, s->smticks, y_distance);
-
-        if (y_distance < 0.0) {
-          *s = SmRelativePos::incremented_by(*s, 192.0/cur_snap_nths);
-          continue;
-        }
-        if (y_distance > this->height()) { break; }
-        double y = downscroll ? (double)this->height() - y_distance : y_distance;
-
-        // -- In SM/Etterna, actual notes will have weird colors on weird snaps
-        // -- because they are snapped to the nearest smtick (at least that's how
-        // -- they are stored in most files).
-        // -- There should be some checkbox somewhere if we want smticks to be int
-        // -- or float and only quantized on save. We don't want to break existing
-        // -- 28th colored streams for example.
-        // QColor color = qcolor_from_smticks((int32_t)roundl(s->smticks));
-        QColor color = qcolor_from_smticks(s->smticks);
-        color.setAlphaF(.6f);
-        pen.setColor(color);
-        pen.setWidth(
-          std::fmod(s->smticks, 48.) == 0 ? 4 :
-          std::fmod(s->smticks, 24.) == 0 ? 3 :
-          std::fmod(s->smticks, 16.) == 0 ? 2 :
-          std::fmod(s->smticks, 12.) == 0 ? 2 : 1
-         );
-        painter.setPen(pen);
-        auto snap_line = QLineF(left_start, y, left_start + 4 * note_width, y);
-        painter.drawLine(snap_line);
-
-        *s = SmRelativePos::incremented_by(*s, 192.0/cur_snap_nths);
-      }
-    }
-
-
-    std::function<NoteRowRects(NoteRow)>
-    rectangles_at_smtick_pos = [&](NoteRow row)
-    {
-      uint32_t global_smticks = row.smticks + row.beat * 48 + row.measure * 48 * 4;
-
-      auto line = (NoteRowRects){
-        .rects = {},
-        .color = qcolor_from_smticks(row.smticks)
-      };
-
-      for (size_t i = 0; i < 4; i++) {
-        if (row.notes[i] == NoteType::Tap) {
-          line.rects.push_back(
-            QRect((int32_t)(left_start + note_width * (int32_t)i),
-                  (int32_t)(px_of_measure_zero + px_per_smtick() * global_smticks),
-                  note_width, note_height)
-          );
-        }
-      }
-      return line;
-    };
-
-
-    // might be very slow for now
-    Vector<NoteRow> note_rows = smfile.diffs[0].note_rows();
-
-    Vector<NoteRowRects> rectangles;
-    std::transform(note_rows.begin(), note_rows.end(), std::back_inserter(rectangles), [&](NoteRow nr) {return rectangles_at_smtick_pos(nr);});
-
-    QRectF cont_rect = this->contentsRect();
-
-    for (auto pat : rectangles) {
-      for (auto rect : pat.rects) {
-        if (downscroll) {
-          // printf("cont_rect h: %d, rect_y: %g, rect_h: %g\n",
-          //        cont_rect.height(), rect.y(), rect.height());
-          rect.moveBottom(cont_rect.height() - rect.top());
-          // printf("top y is now %g\n", rect.y());
-        }
-        painter.fillRect(rect, pat.color);
-      }
+  } else { // move
+    if ((event->angleDelta().ry() < 0) ^ !downscroll) {
+      new_pos = SmRelativePos::incremented_by(cur_chart_pos, -smticks_in_1_(cur_snap_nths));
+    } else {
+      new_pos = SmRelativePos::incremented_by(cur_chart_pos, +smticks_in_1_(cur_snap_nths));
     }
   }
-  
+  // printf("pos after: %d %d %lg\n", new_pos.measures, new_pos.beats, new_pos.smticks);
+  cur_chart_pos = (new_pos.measures < 0) ? (SmRelativePos){0} : new_pos;
+
+  // printf("raw smticks: %d\n", chart_pos.raw_smticks());
+  // 
+  // -- FIXMEEEEEEEEEEEEEEEE: we need to get the pointer to status_bar from somewhere,
+  // -- but that reeks with spaghetti. Or I can store a list of magical function pointers
+  // -- somewhere. I don't know of a good idea to resolve this
+  status_bar->redraw();
+  this->update();
+  // positionChanged(cur_chart_pos, cur_snap_nths);
 };
+
+
+void NoteDisplayWidget::paintEvent(QPaintEvent */*event*/) {
+  QPainter painter(this);
+  painter.setRenderHint(QPainter::Antialiasing);
+
+  // visually scroll to desired place
+  px_of_measure_zero = PX_VISUAL_OFFSET_FROM_HORIZ_LINE - px_per_smtick() * cur_chart_pos.total_smticks();
+
+  int32_t note_width  = 60;
+  int32_t note_height = 20;
+  int32_t px_judge_line_off = 30;
+  int32_t left_start = this->width() / 2 - (int32_t)(2 * note_width); // for centering
+
+  QPen pen;
+
+  // draw judge line
+  {
+    auto judge_line = QLine(0, px_judge_line_off, this->width()-1, px_judge_line_off);
+    if (downscroll) {
+      int new_y = this->height() - judge_line.y1();
+      judge_line.setLine(0, new_y, this->width()-1, new_y);
+    }
+    pen.setWidth(5); pen.setColor(Qt::white); painter.setPen(pen);
+    painter.drawLine(judge_line);
+  }
+
+  // draw corner beams around the left and right edge of playfield
+  {
+    auto left_edge  = QLineF(left_start,              0, left_start,               this->height()-1);
+    auto right_edge = QLineF(left_start+note_width*4, 0, left_start+note_width*4,  this->height()-1);
+    pen.setWidth(2); pen.setColor(Qt::gray); painter.setPen(pen);
+    painter.drawLine(left_edge);
+    painter.drawLine(right_edge);
+  }
+
+  // draw snaplines, starting from previous measure
+  {
+    SmRelativePos snap_of_this_snapline = cur_chart_pos;
+    auto s = &snap_of_this_snapline;
+    s->measures -= 1;
+
+    // printf("---------------\n");
+    for (int i = 0; i < 300; i++) {
+      double y_distance = px_of_measure_zero + s->total_smticks() * px_per_smtick();
+      // printf("snap of this snapline: %d:%d:%lg, which translates to %lg px\n",
+      //        s->measures, s->beats, s->smticks, y_distance);
+
+      if (y_distance < 0.0) {
+        *s = SmRelativePos::incremented_by(*s, 192.0/cur_snap_nths);
+        continue;
+      }
+      if (y_distance > this->height()) { break; }
+      double y = downscroll ? (double)this->height() - y_distance : y_distance;
+
+      // -- In SM/Etterna, actual notes will have weird colors on weird snaps
+      // -- because they are snapped to the nearest smtick (at least that's how
+      // -- they are stored in most files).
+      // -- There should be some checkbox somewhere if we want smticks to be int
+      // -- or float and only quantized on save. We don't want to break existing
+      // -- 28th colored streams for example.
+      // QColor color = qcolor_from_smticks((int32_t)roundl(s->smticks));
+      QColor color = qcolor_from_smticks(s->smticks);
+      color.setAlphaF(.6f);
+      pen.setColor(color);
+      pen.setWidth(
+        std::fmod(s->smticks, 48.) == 0 ? 4 :
+        std::fmod(s->smticks, 24.) == 0 ? 3 :
+        std::fmod(s->smticks, 16.) == 0 ? 2 :
+        std::fmod(s->smticks, 12.) == 0 ? 2 : 1
+       );
+      painter.setPen(pen);
+      auto snap_line = QLineF(left_start, y, left_start + 4 * note_width, y);
+      painter.drawLine(snap_line);
+
+      *s = SmRelativePos::incremented_by(*s, 192.0/cur_snap_nths);
+    }
+  }
+
+
+  std::function<NoteRowRects(NoteRow)>
+  rectangles_at_smtick_pos = [&](NoteRow row)
+  {
+    uint32_t global_smticks = row.smticks + row.beat * 48 + row.measure * 48 * 4;
+
+    auto line = (NoteRowRects){
+      .rects = {},
+      .color = qcolor_from_smticks(row.smticks)
+    };
+
+    for (size_t i = 0; i < 4; i++) {
+      if (row.notes[i] == NoteType::Tap) {
+        line.rects.push_back(
+          QRect((int32_t)(left_start + note_width * (int32_t)i),
+                (int32_t)(px_of_measure_zero + px_per_smtick() * global_smticks),
+                note_width, note_height)
+        );
+      }
+    }
+    return line;
+  };
+
+
+  // might be very slow for now
+  Vector<NoteRow> note_rows = smfile.diffs[0].note_rows();
+
+  Vector<NoteRowRects> rectangles;
+  std::transform(note_rows.begin(), note_rows.end(), std::back_inserter(rectangles), [&](NoteRow nr) {return rectangles_at_smtick_pos(nr);});
+
+  QRectF cont_rect = this->contentsRect();
+
+  for (auto pat : rectangles) {
+    for (auto rect : pat.rects) {
+      if (downscroll) {
+        // printf("cont_rect h: %d, rect_y: %g, rect_h: %g\n",
+        //        cont_rect.height(), rect.y(), rect.height());
+        rect.moveBottom(cont_rect.height() - rect.top());
+        // printf("top y is now %g\n", rect.y());
+      }
+      painter.fillRect(rect, pat.color);
+    }
+  }
+}
+  
 
 
 __attribute__((noreturn))
@@ -847,6 +874,8 @@ int main(int argc, char **argv) {
     // -- so I can draw status_bar.redraw() inside NoteDisplayWidget later;
     // -- spaghetti, I know, but don't have a much better idea rn
     preview_actual.status_bar = &status_bar;
+    status_bar.note_display_widget = &preview_actual;
+
 
     // -- .show() spawns it in a new window, we don't want that
 
@@ -886,14 +915,13 @@ int main(int argc, char **argv) {
     QHBoxLayout preview_controls;
 
       QCheckBox downscroll_chk("Downscroll");
-        downscroll_chk.setCheckState(Qt::Checked);
         QObject::connect(
           &downscroll_chk,
           &QCheckBox::checkStateChanged,
           &preview_actual,
-          &NoteDisplayWidget::onDownscrollCheckboxClick
+          &NoteDisplayWidget::onDownscrollChange
         );
-        preview_actual.onDownscrollCheckboxClick(downscroll_chk.checkState());  // set initial
+        downscroll_chk.setCheckState(Qt::Checked);
       preview_controls.addWidget(&downscroll_chk, 6);
       preview_controls.setAlignment(&downscroll_chk, Qt::AlignCenter);
 
