@@ -13,7 +13,7 @@ using namespace Qt::Literals::StringLiterals;
 #include <sys/inotify.h>
 #include <unistd.h>
 
-// dumb C++ STL replacements, trying to make it compile faster
+// abstract away some parts of C++ STL, for testing compilation times
 #include "dumb_stdlib_linux.h"
 
 #pragma GCC poison printf
@@ -1029,8 +1029,36 @@ QWidget* KVTreeViewDelegate::createEditor
     // assert(false && "non-exhaustive variant");
     return nullptr; // for now
   }
-
 }
+
+struct MainWindow : public QMainWindow {
+  QTabWidget w_tabs_root;
+
+  MainWindow() {
+    // -- menu bar
+    QMenuBar *menuBar = this->menuBar();
+    QMenu *fileMenu = menuBar->addMenu("File");
+
+    QAction *exitAction = fileMenu->addAction("Exit");
+    connect(exitAction, &QAction::triggered, this, &QWidget::close);
+
+    // -- XXX: you still need to handle the event somehow
+    w_tabs_root.setTabsClosable(true);
+    w_tabs_root.setMovable(true);
+    
+    const char *path1 = "ext/Shannon's Theorem.sm";
+    SmFileView *file1 = new SmFileView(path1);
+    w_tabs_root.addTab(file1, path1);
+    // const char *path2 = "ext/psychology.sm"; // -- this is multi bpm
+    const char *path2 = "ext/Yatsume Ana.sm";
+    SmFileView *file2 = new SmFileView(path2);
+    w_tabs_root.addTab(file2, path2);
+
+    // w_tabs_root.show();
+    this->setCentralWidget(&w_tabs_root);
+
+  }
+};
 
 
 // --------------------------------------------------------------------------------------------------
@@ -1062,29 +1090,8 @@ int main(int argc, char **argv) {
 
   // -- QGuiApplication doesn't work if you want widgets
   QApplication app(argc, argv);
-
-
-
-
-  QTabWidget w_tabs_root;
-  // -- XXX: you still need to handle the event somehow
-  w_tabs_root.setTabsClosable(true);
-  w_tabs_root.setMovable(true);
-
-  const char *path1 = "ext/Shannon's Theorem.sm";
-  SmFileView *file1 = new SmFileView(path1);
-  w_tabs_root.addTab(file1, path1);
-  // const char *path2 = "ext/psychology.sm"; // -- this is multi bpm
-  const char *path2 = "ext/Yatsume Ana.sm";
-  SmFileView *file2 = new SmFileView(path2);
-  w_tabs_root.addTab(file2, path2);
-
-  // -- DONE, move everything below this
-
-  // -- TODO at some point, use QMainWindow
-  // setCentralWidget(w_tabs_root);
-  w_tabs_root.show();
-  // w_root->show();
+  MainWindow window;
+  window.show();
 
   int ret = app.exec();
   return ret;

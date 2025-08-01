@@ -17,6 +17,8 @@
 #include <QTextEdit>
 #include <QWindow>
 #include <QPushButton>
+#include <QMainWindow>
+#include <QMenuBar>
 
 // painter stuff
 #include <QPainter>
