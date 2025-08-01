@@ -19,6 +19,7 @@
 #include <QPushButton>
 #include <QMainWindow>
 #include <QMenuBar>
+#include <QFileDialog>
 
 // painter stuff
 #include <QPainter>

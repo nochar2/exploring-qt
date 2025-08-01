@@ -8,6 +8,7 @@ using std::string;
 void __please(){qt_includes_suppress_bogus_unused_warning=0;};
 using namespace Qt::Literals::StringLiterals;
 
+#include <libgen.h>
 
 // reload hacks
 #include <sys/inotify.h>
@@ -1035,24 +1036,56 @@ struct MainWindow : public QMainWindow {
   QTabWidget w_tabs_root;
 
   MainWindow() {
+    // -- default tabs
+    w_tabs_root.setTabsClosable(true); // -- XXX: unhandled
+    w_tabs_root.setMovable(true);
+    w_tabs_root.setStyleSheet("QTabBar::tab {max-width: 100px;}");
+    w_tabs_root.setElideMode(Qt::ElideRight);
+    
+    // -- By the time the file opener lambda finds time to visit his load_file friend,
+    // -- she finds him gone, surrounded by nothing but segfaults and memory corruption.
+    // -- Hence static (or use a normal function).
+    static auto load_file = [&](const char *path) {
+      SmFileView *file = new SmFileView(path);
+      assert(file != nullptr);
+      const char *bn = basename((char *)path);
+      w_tabs_root.addTab(file, QString(bn));
+      w_tabs_root.setTabToolTip(w_tabs_root.count()-1, path);
+    };
+    
+    load_file("ext/Shannon's Theorem.sm");
+    load_file("ext/Yatsume Ana.sm");
+    // load_file("ext/psychology.sm"); // -- this is multi bpm
+    
+
     // -- menu bar
     QMenuBar *menuBar = this->menuBar();
     QMenu *fileMenu = menuBar->addMenu("File");
 
+    QAction *openAction = fileMenu->addAction("Open");
+    connect(openAction, &QAction::triggered, this, [&](){
+      QString fileName = QFileDialog::getOpenFileName(
+        this,
+        "Open File",
+        nullptr, // current dir
+        "Stepmania files (*.sm)"
+      );
+      if (fileName != nullptr) {
+        std::string std_fileName = fileName.toStdString();
+        const char *c_fileName = std_fileName.c_str();
+        eprintf("chosen file name: %s\n", c_fileName);
+
+        // SmFileView *file = new SmFileView(c_fileName);
+        // assert(file != nullptr);
+        // const char *bn = basename((char *)c_fileName);
+        // w_tabs_root.addTab(file, QString(bn));
+        // w_tabs_root.setTabToolTip(w_tabs_root.count()-1, c_fileName);
+        load_file(c_fileName);
+      }
+    });
     QAction *exitAction = fileMenu->addAction("Exit");
     connect(exitAction, &QAction::triggered, this, &QWidget::close);
 
-    // -- XXX: you still need to handle the event somehow
-    w_tabs_root.setTabsClosable(true);
-    w_tabs_root.setMovable(true);
-    
-    const char *path1 = "ext/Shannon's Theorem.sm";
-    SmFileView *file1 = new SmFileView(path1);
-    w_tabs_root.addTab(file1, path1);
-    // const char *path2 = "ext/psychology.sm"; // -- this is multi bpm
-    const char *path2 = "ext/Yatsume Ana.sm";
-    SmFileView *file2 = new SmFileView(path2);
-    w_tabs_root.addTab(file2, path2);
 
     // w_tabs_root.show();
     this->setCentralWidget(&w_tabs_root);
