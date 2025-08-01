@@ -17,38 +17,34 @@ enum class DiffType { Beginner, Easy, Medium, Hard, Challenge, Edit };
 std::string string_from_difftype(DiffType dt);
 std::string string_from_gametype(GameType gt);
 
-enum class NoteType : char {
-  None   = '0',
-  Tap    = '1',
-  Hold   = '2',
-  HRLift = '3',
-  Rolld  = '4',
-  Mine   = 'M',
-  Lift   = 'L',
-  Fake   = 'F',
-};
 
-// -- this doesn't work :(
-// -- and there's some other variant with throw which works but the error msg is garbage
-// template <uint8_t max>
-// struct Fin {
-//   uint8_t n;
-//   consteval Fin(uint8_t n_raw) : n(n_raw) {
-//     if (n_raw >= max) { static_assert(false, "Value is outside of the Fin range"); }
-//   }
-// };
-struct NoteRow {
-  uint32_t measure;
-  uint32_t beat; // 0..3, possibly more
-  uint32_t smticks; // 0..47
+// I could store '0', '1' etc., but then what would other memory
+// values mean?
+enum class NoteType : char { None,Tap,Hold,HRLift,Rolld,Mine,Lift,Fake };
+NoteType char_to_notetype(char c);
+char notetype_to_char(NoteType nt);
+
+
+
+// -- not good
+// struct NoteRow {
+//   uint32_t measure;
+//   uint32_t beat; // 0..3, possibly more
+//   uint32_t smticks; // 0..47
   // actually, idk if this should be with offset or without
-  double sec_zero_offset;
-  Array<NoteType, 4> notes;
-};
+  // double sec_zero_offset;
+  // Array<NoteType, 4> notes;
+// };
 
-struct Measure {
-  Vector<NoteRow> note_rows;
-};
+constexpr uint32_t BEATS_PER_MEASURE = 4; // 99.99999 % of all charts
+
+// -- memory inefficient, but we don't care. It's convenient for now!
+struct NoteRow { Array<NoteType, 4> notes; };
+struct Beat    { Array<NoteRow,48> note_rows; };
+struct Measure { Array<Beat, BEATS_PER_MEASURE> beats; };
+
+bool noterow_is_zero(NoteRow nr);
+
 
 struct Difficulty {
   GameType game_type;
@@ -57,7 +53,7 @@ struct Difficulty {
   uint32_t diff_num;
   Vector<double> groove_values;
   Vector<Measure> measures;
-  Vector<NoteRow> note_rows();
+  // Vector<NoteRow> note_rows();
   size_t total_note_rows();
 };
 

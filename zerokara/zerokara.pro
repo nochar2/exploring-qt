@@ -9,8 +9,9 @@
 ### The default value of CONFIG is this monstrosity:
 ### lex yacc debug exceptions depend_includepath testcase_targets import_plugins import_qpa_plugin file_copies qmake_use qt warn_on release link_prl incremental release shared plugin_manifest intelcet glibc_fortify_source trivial_auto_var_init_pattern stack_protector stack_clash_protection libstdcpp_assertions relro_now_linker linux unix posix gcc
 
+# C++23 required for enumerations
 CONFIG = qt import_qpa_plugin \
-	c++20 warn_on rtti_off exceptions_off \
+	c++2b warn_on rtti_off exceptions_off \
 	debug force_debug_info 
 	# precompile_header
 # PRECOMPILED_HEADER = precompiled.h

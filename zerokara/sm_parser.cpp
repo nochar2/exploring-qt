@@ -5,6 +5,8 @@
 #include <format>
 #include <ranges>
 
+#include <cstring>
+
 // using std::array;
 // using std::vector;
 using std::string;
@@ -13,25 +15,64 @@ using namespace std::string_literals;
 
 #define eprintf(...) fprintf(stderr, __VA_ARGS__)
 
+
+NoteType char_to_notetype(char c) {
+  using enum NoteType;
+  switch (c) {
+    case '0': return None;
+    case '1': return Tap;
+    case '2': return Hold;
+    case '3': return HRLift;
+    case '4': return Rolld;
+    case 'M': return Mine;
+    case 'L': return Lift;
+    case 'F': return Fake;
+    default: assert(false);
+  }
+}
+char notetype_to_char(NoteType nt) {
+  using enum NoteType;
+  switch (nt) {
+    case None   : return '0';
+    case Tap    : return '1';
+    case Hold   : return '2';
+    case HRLift : return '3';
+    case Rolld  : return '4';
+    case Mine   : return 'M';
+    case Lift   : return 'L';
+    case Fake   : return 'F';
+  }
+  assert(false && "the compiler doesn't know that the switch is exhaustive");
+}
+
+bool noterow_is_zero(NoteRow nr) {
+  return std::all_of(nr.notes.begin(), nr.notes.end(), [](NoteType note){return note == NoteType::None;});
+}
+
 size_t Difficulty::total_note_rows() {
   size_t n = 0;
   for (auto m : this->measures) {
-    for (auto _ : m.note_rows) {
-      n += 1;
+    for (auto bt : m.beats) {
+      for (auto nr : bt.note_rows) {
+        if (!noterow_is_zero(nr)) {
+          n += 1;
+        }
+      }
     }
   }
   return n;
 }
+
 // naive and slow, but let's do it for now
-Vector<NoteRow> Difficulty::note_rows() {
-  Vector<NoteRow> ret;
-  for (auto m : this->measures) {
-    for (auto nl : m.note_rows) {
-      ret.push_back(nl);
-    }
-  }
-  return ret;
-}
+// Vector<NoteRow> Difficulty::note_rows() {
+//   Vector<NoteRow> ret;
+//   for (auto m : this->measures) {
+//     for (auto nl : m.note_rows) {
+//       ret.push_back(nl);
+//     }
+//   }
+//   return ret;
+// }
 
 bool smfile_key_is_string_type(string_view sv) {
   // possibly more
@@ -357,14 +398,16 @@ smfile_from_string_opt(string const& str)
                 };
               }
               Array<NoteType,4> line = {{
-                static_cast<NoteType>(line_s[0]),
-                static_cast<NoteType>(line_s[1]),
-                static_cast<NoteType>(line_s[2]),
-                static_cast<NoteType>(line_s[3]),
+                char_to_notetype(line_s[0]),
+                char_to_notetype(line_s[1]),
+                char_to_notetype(line_s[2]),
+                char_to_notetype(line_s[3]),
               }};
-              // I don't know beat / ticks / seconds because I don't know the pattern count per measure yet
+              // -- I don't know beat / ticks / seconds because I don't know the pattern count per measure yet
               // std::println(stderr, "pushing back a line {}", line_s);
-              current_measure_pre.push_back((NoteRow){ .measure=measure_i, .beat=0, .smticks=0, .sec_zero_offset=0, .notes=line });
+              // 
+              // current_measure_pre.push_back((NoteRow){ .measure=measure_i, .beat=0, .smticks=0, .sec_zero_offset=0, .notes=line });
+              current_measure_pre.push_back((NoteRow){.notes=line});
               break;
             }
             default:
@@ -380,16 +423,15 @@ smfile_from_string_opt(string const& str)
           // fflush(stdout);
             
           // Resolve the timing info.
-          uint32_t beats_per_measure = 4; // 99.99999 % of all charts
           uint32_t pats_per_measure = (uint32_t)current_measure_pre.size();
           assert(pats_per_measure != 0); // for now
 
-          auto b = beats_per_measure;
+          auto b = BEATS_PER_MEASURE;
           Array<size_t, 10> common_ppm = {b, 2*b, 3*b, 4*b, 6*b, 8*b, 12*b, 16*b, 24*b, 48*b};
           if (pats_per_measure % b != 0) {
             // return (SmParseError){.msg=std::format(
               eprintf("W: While reading #Notes/NoteRows: Measure %u has number of rows %u, which is not divisible by time signature %u/4.\n",
-              measure_i, pats_per_measure, beats_per_measure);
+              measure_i, pats_per_measure, BEATS_PER_MEASURE);
             // };
           } else if (std::none_of(common_ppm.begin(), common_ppm.end(), [&](auto x){ return pats_per_measure == x; })) {
               eprintf("W: While reading #Notes/NoteRows: Measure %u has an unusual number of rows %u\n",
@@ -403,16 +445,16 @@ smfile_from_string_opt(string const& str)
           // size_t notelines_in_this_measure = 0;
           // auto begin
           Measure m;
-          for (auto nl : current_measure_pre) {
-            if (!std::all_of(nl.notes.begin(),
-                             nl.notes.end(),
-                             [](auto x){return x == NoteType::None;}))
-            {
-              nl.beat    = (uint8_t)((i * beats_per_measure * 48 / pats_per_measure) / 48);
-              nl.smticks = (uint8_t)((i * beats_per_measure * 48 / pats_per_measure) % 48);
-              nl.sec_zero_offset = secs_per_beat * (nl.beat + nl.smticks / 48.);
+          memset(&m, 0, sizeof m);
+          for (auto nr : current_measure_pre) {
+            if (!noterow_is_zero(nr)) {
+              size_t beat    = (uint8_t)((i * BEATS_PER_MEASURE * 48 / pats_per_measure) / 48);
+              size_t smticks = (uint8_t)((i * BEATS_PER_MEASURE * 48 / pats_per_measure) % 48);
+              // -- NOTE: this should be computed elsewhere, probably on-demand
+              // -- from list of BPM changes, but point is I need to do it in zerokara.cpp also.
+              // nl.sec_zero_offset = secs_per_beat * (nl.beat + nl.smticks / 48.);
               // notelines_in_this_measure += 1;
-              m.note_rows.push_back(nl);
+              m.beats[beat].note_rows[smticks] = nr;
             }
             i++;
           }

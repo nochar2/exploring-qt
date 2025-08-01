@@ -19,6 +19,8 @@ using namespace Qt::Literals::StringLiterals;
 #pragma GCC poison printf
 #define eprintf(...) fprintf(stderr, __VA_ARGS__)
 
+#include <ranges>
+using std::ranges::views::enumerate;
 
 // @structures ----------------------------------------------------------------------------------------------------
 struct NoteDisplayWidget;
@@ -41,9 +43,12 @@ struct NoteDisplayWidget : public QWidget {
   void redraw();
   void wheelEvent(QWheelEvent *event) override;
   void paintEvent(QPaintEvent *event) override;
+  void keyPressEvent(QKeyEvent *event) override;
   void onCmodChange(int value);
   void onDownscrollChange(Qt::CheckState state);
 };
+
+
 
 struct StatusBar : public QWidget {
   SmFileView *sm_file_view;
@@ -238,8 +243,8 @@ using TreeValue = std::variant<
   , DoubleField
   , DiffType
   , uint32_t
-  , SmRelativePos // measure
-  , NoteRow       // particular noterow
+  , SmRelativePos // measure/beat/smticks
+  , NoteRow       // particular note data without pos info
 >;
 
 Q_DECLARE_METATYPE(TreeValue);
@@ -277,6 +282,7 @@ struct SmFileView : public QWidget {
   KVTreeViewDelegate *smfile_view_delegate;
 
   // widgets (roughly how they're nested)
+  // (maybe some of this can just leak and not be here)
   QHBoxLayout *layout_;
     QSplitter *resizable_layout;
       QTreeView *tree_view;
@@ -349,6 +355,16 @@ void StatusBar::redraw() {
     this->btn_reset_weird_snap.show();
   } else {
     this->btn_reset_weird_snap.hide();
+  }
+}
+
+void NoteDisplayWidget::keyPressEvent(QKeyEvent *event) {
+  eprintf("Key press %d\n", event->key());
+  if (event->key() == '0') {
+    // XXX: Oh yeah. There should be a pointer to currently active Difficulty.
+    // XXX: Oh yeah, you need to locate the actual note, which might not even
+    // be in the list. Why not just do the stupidest thing and have a sparse matrix?
+    // this->sm_file_view->smfile.diffs[0]
   }
 }
 
@@ -432,14 +448,16 @@ void NoteDisplayWidget::paintEvent(QPaintEvent */*event*/) {
   }
 
 
-  std::function<NoteRowRects(NoteRow)>
-  rectangles_at_smtick_pos = [&](NoteRow row)
+  std::function<NoteRowRects(NoteRow,SmRelativePos)>
+  noterow_to_rectangles = [&](NoteRow row, SmRelativePos pos)
   {
-    uint32_t global_smticks = row.smticks + row.beat * 48 + row.measure * 48 * 4;
+    // replace this if we encounter a non-4/4 file
+    uint32_t global_smticks
+      = (uint32_t)pos.smticks + (uint32_t)pos.beats * 48 + (uint32_t)pos.measures * 48 * 4;
 
     auto line = (NoteRowRects){
       .rects = {},
-      .color = qcolor_from_smticks(row.smticks)
+      .color = qcolor_from_smticks(pos.smticks)
     };
 
     for (size_t i = 0; i < 4; i++) {
@@ -455,11 +473,17 @@ void NoteDisplayWidget::paintEvent(QPaintEvent */*event*/) {
   };
 
 
-  // might be very slow for now
-  Vector<NoteRow> note_rows = v->smfile.diffs[0].note_rows();
-
   Vector<NoteRowRects> rectangles;
-  std::transform(note_rows.begin(), note_rows.end(), std::back_inserter(rectangles), [&](NoteRow nr) {return rectangles_at_smtick_pos(nr);});
+  for (auto [me_i, me] : enumerate(v->smfile.diffs[0].measures)) {
+    for (auto [bt_i, bt] : enumerate(me.beats)) {
+      for (auto [nr_i, nr] : enumerate(bt.note_rows)) {
+        if (!noterow_is_zero(nr)) {
+          auto pos = (SmRelativePos){.measures=(int32_t)me_i,.beats=(int32_t)bt_i,.smticks=(double)nr_i};
+          rectangles.push_back(noterow_to_rectangles(nr, pos));
+        }
+      }
+    }
+  }
 
   QRectF cont_rect = this->contentsRect();
 
@@ -646,55 +670,70 @@ void KVTreeModel::push_data_to_the_view() {
       dt_v->setForeground(brush);
       num_cell->appendRow({dt_n, dt_v});
 
-      auto *dv_n = new Cell("Diff value");
+      auto *c_dv_nrkkkkjj = new Cell("Diff value");
       auto *dv_v = new Cell(QString::number(diff.diff_num));
       dv_v->setData(diff.diff_num);
-      num_cell->appendRow({dv_n, dv_v});
+      num_cell->appendRow({c_dv_nrkkkkjj, dv_v});
       auto *nr_n = new Cell(u"Note rows (%1)"_s.arg(diff.total_note_rows()));
       num_cell->appendRow(nr_n);
       auto *measures_n = new Cell(u"Measures (%1)"_s.arg(diff.measures.size()));
       num_cell->appendRow(measures_n);
 
-      auto draw_note_rows = [](Cell *t_parent, const Vector<NoteRow>& note_rows) {
-        for (auto &nl : note_rows) {
-          auto *t_noteline_snap = new Cell(
-            u"%1/%2/<span style='color: %4; font-weight: 600;'>%3</span>"_s
-            // u"%1/%2/%3"_s
-            .arg(nl.measure).arg(nl.beat).arg(nl.smticks)
-            .arg(cstr_from_smticks(nl.smticks))
-          );
-          QString line_s;
-          for (auto n : nl.notes) { line_s.push_back((char)n); }
-          auto *t_noteline_notes = new Cell(line_s);
-          t_noteline_snap->setData(PACK(nl));
-          t_noteline_notes->setData(PACK(nl));
+      auto draw_noterows_for_measure = [](Cell *t_parent, Measure *me, int32_t me_i) {
+        for (auto [bt_i, bt] : enumerate(me->beats)) {
+          for (auto [smt_i, nr] : enumerate(bt.note_rows)) {
+            if (noterow_is_zero(nr)) continue;
+            
+            // -- snap
+            auto *t_noteline_snap = new Cell(
+              u"%1/%2/<span style='color: %4; font-weight: 600;'>%3</span>"_s
+              // u"%1/%2/%3"_s
+              .arg(me_i).arg(bt_i).arg(smt_i)
+              .arg(cstr_from_smticks(smt_i))
+            );
+            SmRelativePos pos = {.measures=(int32_t)me_i, .beats=(int32_t)bt_i, .smticks=(double)smt_i};
+            t_noteline_snap->setData(PACK(pos));
 
-          // -- alternatively, set background color:
-          // QColor snap_color = qcolor_from_smticks(nl.smticks);
-          // snap_color.setAlphaF(.12f); // 0 is fully transparent
-          // QBrush brush(snap_color);
-          // t_noteline_notes->setBackground(brush);
-          t_parent->appendRow({t_noteline_snap, t_noteline_notes});
+            // -- note data
+            QString line_s;
+            for (auto n : nr.notes) { line_s.push_back(notetype_to_char(n)); }
+
+            auto *t_noteline_notes = new Cell(line_s);
+            t_noteline_notes->setData(PACK(nr));
+
+            // -- alternatively, set background color:
+            // QColor snap_color = qcolor_from_smticks(nl.smticks);
+            // snap_color.setAlphaF(.12f); // 0 is fully transparent
+            // QBrush brush(snap_color);
+            // t_noteline_notes->setBackground(brush);
+            t_parent->appendRow({t_noteline_snap, t_noteline_notes});
+          }
         }
       };
-      draw_note_rows(nr_n, diff.note_rows());
-      int32_t mr_i = 0;
-      for (auto m : diff.measures) {
-        auto *measure_n = new Cell(u"Measure %1"_s.arg(mr_i));
-        auto pos = (SmRelativePos){mr_i, 0, 0};
-        measure_n->setData(PACK(pos));
-        draw_note_rows(measure_n, m.note_rows);
-        measures_n->appendRow(measure_n);
 
-        mr_i += 1;
+      // -- all noterows in one pile
+      for (auto [me_i, me] : enumerate(diff.measures)) {
+        draw_noterows_for_measure(nr_n, &me, me_i);
+      }
+
+      // -- noterows in each measure
+      for (auto [me_i, me] : enumerate(diff.measures)) {
+        auto *measure_n = new Cell(u"Measure %1"_s.arg(me_i));
+
+        // -- so I can double click on the measure cell too
+        auto pos = (SmRelativePos){(int32_t)me_i, 0, 0};
+        measure_n->setData(PACK(pos));
+
+        draw_noterows_for_measure(measure_n, &me, (int32_t)me_i);
+        measures_n->appendRow(measure_n);
       }
     
       diffs_cell->appendRow(num_cell);
       diff_i += 1;
-    } // end of diff loop
+    } // -- end of diff loop
     this->invisibleRootItem()->appendRow(diffs_cell);
-  } // end of all diffs
-}
+  } // -- end of all diffs
+};
 
 
   
@@ -795,13 +834,8 @@ SmFileView::SmFileView(const char *path) {
         // ew! but works for now
         TreeValue row_var = *(TreeValue *)qvar.data();
         if (0) {
-        } else if (std::holds_alternative<NoteRow>(row_var)) { // clicked on a noterow
-          NoteRow row = std::get<NoteRow>(row_var);
-          // NOTE: maybe put SmRelativePos into the sm_parser already
-          SmRelativePos new_pos
-            = {(int32_t)row.measure, (int32_t)row.beat, (double)row.smticks};
-          cur_chart_pos = new_pos;
-
+        } else if (std::holds_alternative<NoteRow>(row_var)) { // clicked on note data
+          // nothing for now
         } else if (std::holds_alternative<SmRelativePos>(row_var)) { // clicked on a measure
           auto new_pos = std::get<SmRelativePos>(row_var);
           cur_chart_pos = new_pos;
@@ -849,6 +883,7 @@ SmFileView::SmFileView(const char *path) {
     preview_tile->addLayout(preview_controls, 0);
 
   resizable_layout->addWidget(right_chunk);
+
 }
 
 

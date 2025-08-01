@@ -22,7 +22,10 @@
 #include <QPainter>
 #include <QPalette>
 #include <QRect>
+
+// events
 #include <QScrollEvent>
+#include <QKeyEvent>
 
 // custom model stuff
 #include <QTreeView>
