@@ -1,24 +1,31 @@
-
 // base
 #include <QApplication>
 
-// widgets
-#include <QBoxLayout>
-#include <QComboBox>
-#include <QFrame>
-#include <QCheckBox>
+// -- static widgets
+// text
 #include <QLabel>
-#include <QLineEdit>
-#include <QRadioButton>
-#include <QSlider>
+
+// -- input/output
+// int/double
 #include <QSpinBox>
-#include <QSplitter>
-#include <QTabWidget>
-#include <QTextEdit>
-#include <QWindow>
+// boolean
+#include <QCheckBox>
+// range of strings
+#include <QComboBox>
+// single line string
+#include <QLineEdit>
 #include <QPushButton>
-#include <QMainWindow>
+
+// -- layout
+#include <QBoxLayout>
+#include <QFrame>
+#include <QSplitter>
 #include <QMenuBar>
+#include <QMainWindow>
+#include <QTabWidget>
+
+// -- system pickers
+// (this one is ~15k loc heavy)
 #include <QFileDialog>
 
 // painter stuff
@@ -34,7 +41,5 @@
 #include <QTreeView>
 #include <QStandardItemModel>
 #include <QStyledItemDelegate>
-
-#include <QColor>
 
 static int qt_includes_suppress_bogus_unused_warning;
