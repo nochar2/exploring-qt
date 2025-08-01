@@ -66,6 +66,12 @@ struct SmFile {
   std::string title;
   std::string subtitle;
   std::string artist;
+
+  std::string titletranslit;
+  std::string subtitletranslit;
+  std::string artisttranslit;
+  bool has_translit; // show if you stumble upon one of these fields
+
   std::string background;
   std::string banner;
   std::string cdtitle;

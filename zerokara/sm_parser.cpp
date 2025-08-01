@@ -180,7 +180,7 @@ smfile_from_string_opt(string const& str)
       auto us = Chrono::duration_cast<Chrono::microseconds>(te-tb).count();
       
       // std::print(stderr, "Parsed an SmFile in {} seconds", (double)us / 1000000.);
-      eprintf("Parsed an SmFile in %lf seconds", (double)us / 1000000.);
+      eprintf("Parsed an SmFile in %lf seconds\n", (double)us / 1000000.);
       return smfile;
     }
 
@@ -212,6 +212,9 @@ smfile_from_string_opt(string const& str)
       else if (key == "TITLE")      smfile.title = val;
       else if (key == "SUBTITLE")   smfile.subtitle = val;
       else if (key == "ARTIST")     smfile.artist = val;
+      else if (key == "TITLETRANSLIT")    { smfile.titletranslit = val; smfile.has_translit = true; }
+      else if (key == "SUBTITLETRANSLIT") { smfile.subtitletranslit = val; smfile.has_translit = true; }
+      else if (key == "ARTISTTRANSLIT")   { smfile.artisttranslit = val; smfile.has_translit = true; }
       else if (key == "BACKGROUND") smfile.background = val;
       else if (key == "BANNER")     smfile.banner = val;
       else if (key == "CDTITLE")    smfile.cdtitle = val;

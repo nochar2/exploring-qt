@@ -31,6 +31,10 @@ struct NoteDisplayWidget : public QWidget {
   SmFileView *sm_file_view;
   StatusBar *status_bar;
 
+  NoteDisplayWidget() {
+    setFocusPolicy(Qt::StrongFocus);
+  }
+
   bool downscroll = false;
   int cmod = 400;
   const double PX_VISUAL_OFFSET_FROM_HORIZ_LINE = 30.0;
@@ -253,7 +257,7 @@ struct TreeItem { QString key; TreeValue value; };
 
 struct KVTreeModel : public QStandardItemModel {
   SmFileView *sm_file_view;
-  void push_data_to_the_view();
+  void push_model_to_view();
   KVTreeModel(SmFileView *sm_file_view) : QStandardItemModel(), sm_file_view(sm_file_view) {
   }
 };
@@ -263,8 +267,7 @@ struct KVTreeViewDelegate : public QStyledItemDelegate {
   KVTreeModel *model;
   KVTreeViewDelegate(KVTreeModel *model) : model(model) {}
 
-  // Copied from StackOverflow, no idea. Goal is to provide rich text rendering
-  // for field text
+  // for HTML rendering
   void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override;
 
   QWidget* createEditor (QWidget* parent, const QStyleOptionViewItem& /*option*/,  const QModelIndex& index) const override;
@@ -359,13 +362,31 @@ void StatusBar::redraw() {
 }
 
 void NoteDisplayWidget::keyPressEvent(QKeyEvent *event) {
+  auto pos = this->sm_file_view->cur_chart_pos;
+
   eprintf("Key press %d\n", event->key());
-  if (event->key() == '0') {
-    // XXX: Oh yeah. There should be a pointer to currently active Difficulty.
-    // XXX: Oh yeah, you need to locate the actual note, which might not even
-    // be in the list. Why not just do the stupidest thing and have a sparse matrix?
-    // this->sm_file_view->smfile.diffs[0]
+  NoteRow *loc = &(this
+    ->sm_file_view
+    ->smfile.diffs[0]
+    .measures[pos.measures]
+    .beats[pos.beats]
+    .note_rows[pos.smticks]
+  );
+
+  // XXX: Oh yeah. There should be a pointer to currently active Difficulty.
+  // XXX: Oh yeah, you need to locate the actual note, which might not even
+  // be in the list. Why not just do the stupidest thing and have a sparse matrix?
+  // this->sm_file_view->smfile.diffs[0]
+
+  auto k = event->key(); // this is a keysym, maybe we want a keycode for some keys
+  if ('1' <= k && k <= '4') {
+    loc->notes[k-'1'] = loc->notes[k-'1'] == NoteType::None ? NoteType::Tap : NoteType::None;
   }
+
+  // this->sm_file_view->update();
+  // this->redraw();
+  this->update();
+  this->sm_file_view->smfile_model->push_model_to_view();
 }
 
 void NoteDisplayWidget::paintEvent(QPaintEvent */*event*/) {
@@ -564,7 +585,7 @@ void NoteDisplayWidget::wheelEvent(QWheelEvent *event) {
 
 
 
-void KVTreeModel::push_data_to_the_view() {
+void KVTreeModel::push_model_to_view() {
   auto v = this->sm_file_view;
 
   clear();
@@ -579,18 +600,38 @@ void KVTreeModel::push_data_to_the_view() {
   // annoying and there's many of them. Other types like floats vary too much
   // for abstraction to be useful.
   std::vector<std::tuple<const char *,string>> string_fields;
-  string_fields.push_back({"#TITLE",  v->smfile.title});
-  string_fields.push_back({"#MUSIC",  v->smfile.music});
-  string_fields.push_back({"#ARTIST", v->smfile.artist});
+  string_fields.push_back({"#TITLE",     v->smfile.title});
+  string_fields.push_back({"#SUBTITLE",  v->smfile.subtitle});
+  string_fields.push_back({"#ARTIST",    v->smfile.artist});
+  if (v->smfile.has_translit) {
+    string_fields.push_back({"#TITLETRANSLIT",     v->smfile.titletranslit});
+    string_fields.push_back({"#SUBTITLETRANSLIT",  v->smfile.subtitletranslit});
+    string_fields.push_back({"#ARTISTTRANSLIT",    v->smfile.artisttranslit});
+  }
+  string_fields.push_back({"#CREDIT",  v->smfile.credit});
+  string_fields.push_back({"#MUSIC",   v->smfile.music});
 
   Cell *mtdt_cell = new Cell("Metadata");
   Cell *key_cell;
   Cell *value_cell;
 
+  auto basic_html_sanitize = [](const std::string &s) {
+    std::string replaced;
+    for (char c : s) {
+      switch (c) {
+      case '&': replaced.append("&amp;"); break;
+      case '<': replaced.append("&lt;"); break;
+      case '>': replaced.append("&gt;"); break;
+      default:  replaced.push_back(c); break;
+      }
+    }
+    return replaced;
+  };
+
   for (auto [key,value] : string_fields) {
     key_cell = new Cell(key);
-    value_cell = new Cell(QString::fromStdString(value));
-    value_cell->setData(PACK(&value));
+    value_cell = new Cell(QString::fromStdString(basic_html_sanitize(value)));
+    value_cell->setData(PACK(new std::string(value)));
     mtdt_cell->appendRow({key_cell, value_cell});
   }
 
@@ -670,10 +711,10 @@ void KVTreeModel::push_data_to_the_view() {
       dt_v->setForeground(brush);
       num_cell->appendRow({dt_n, dt_v});
 
-      auto *c_dv_nrkkkkjj = new Cell("Diff value");
+      auto *dv_n = new Cell("Diff value");
       auto *dv_v = new Cell(QString::number(diff.diff_num));
-      dv_v->setData(diff.diff_num);
-      num_cell->appendRow({c_dv_nrkkkkjj, dv_v});
+      dv_v->setData(PACK(diff.diff_num));
+      num_cell->appendRow({dv_n, dv_v});
       auto *nr_n = new Cell(u"Note rows (%1)"_s.arg(diff.total_note_rows()));
       num_cell->appendRow(nr_n);
       auto *measures_n = new Cell(u"Measures (%1)"_s.arg(diff.measures.size()));
@@ -733,6 +774,18 @@ void KVTreeModel::push_data_to_the_view() {
     } // -- end of diff loop
     this->invisibleRootItem()->appendRow(diffs_cell);
   } // -- end of all diffs
+
+
+  // -- XXX: this is a hack, maybe I should do something else
+  v->tree_view->setHeaderHidden(true);
+  // -- XXX: we need to memorize the expand state when we repaint all of this
+  // (or this is completely stupid way to do this and you should update a specific cell?)
+  v->tree_view->expandToDepth(2);
+  // -- why is this so wide???
+  // v->tree_view->resizeColumnToContents(0);
+  v->tree_view->setColumnWidth(0, 200);
+  v->tree_view->setColumnWidth(1, 200);
+
 };
 
 
@@ -783,10 +836,7 @@ SmFileView::SmFileView(const char *path) {
   tree_view->setModel(smfile_model);
   tree_view->setItemDelegate(smfile_view_delegate);
 
-  smfile_model->push_data_to_the_view();
-  tree_view->setHeaderHidden(true);
-  tree_view->expandToDepth(1); // hacky :( but luckily works here
-  tree_view->resizeColumnToContents(0);
+  smfile_model->push_model_to_view();
   resizable_layout->addWidget(tree_view);
 
 
@@ -883,10 +933,11 @@ SmFileView::SmFileView(const char *path) {
     preview_tile->addLayout(preview_controls, 0);
 
   resizable_layout->addWidget(right_chunk);
-
 }
 
 
+// -- Copied from StackOverflow, no idea. Needed if you want rich text rendering
+// -- for field text where different words have different colors
 void KVTreeViewDelegate::paint
 (QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const
 {
@@ -912,22 +963,13 @@ void KVTreeViewDelegate::paint
 QWidget* KVTreeViewDelegate::createEditor
 (QWidget* parent, const QStyleOptionViewItem& /*option*/,  const QModelIndex& index) const
 {
-
-
-  // nullptr -> segfault, parent class -> free invalid size
-  // if (!index.isValid())
-  // return QStyledItemDelegate::createEditor(parent, option, index);
-
-  // TreeValue val;
   eprintf("createEditor called | getting item from index %d\n", index.row());
-  // this can't work, the data is tree-like and the index has just a row ????
   QStandardItem *item = model->itemFromIndex(index);
   eprintf("it has %d columns, and ", item->columnCount());
 
   assert(item);
   QVariant qdata = item->data();
-  // XXX: really nasty, there must be some proper way
-  TreeValue data = *(TreeValue *) qdata.data();
+  TreeValue data = qdata.value<TreeValue>();
 
   // another non-exhaustive dispatch
   if (0) {
@@ -937,8 +979,16 @@ QWidget* KVTreeViewDelegate::createEditor
     for (const char *cs : difftype_cstrs) { combo->addItem(cs); }
     return combo;
   } else if (std::holds_alternative<std::string *>(data)) {
-    eprintf("seems like string to me\n");
+    std::string *s = std::get<std::string *>(data);
+    // in fields where there are no data, it thinks it's
+    // a std::string * (but null)
+    if (s == nullptr) {
+      eprintf("seems like nothing to me\n"); return nullptr;
+    }
+    eprintf("seems like string %s to me\n", s->c_str());
+    std::string str = *s;
     auto *lineEdit = new QLineEdit(parent);
+    lineEdit->setText(QString::fromStdString(str));
     return lineEdit;
   } else if (std::holds_alternative<DoubleField>(data)) {
     eprintf("seems like double to me\n");
@@ -970,11 +1020,12 @@ QWidget* KVTreeViewDelegate::createEditor
   } else if (std::holds_alternative<uint32_t>(data)) {
     eprintf("seems like uint32_t to me\n");
     auto *spinBox = new QSpinBox(parent);
-    // -- TODO set this to whatever Etterna supports as maximum
-    spinBox->setMaximum(UINT32_MAX);
+    // -- it wants int, UINT32_MAX would be -1
+    // -- TODO: check if Etterna needs minimum 1? never seen a chart with a 0
+    spinBox->setMaximum(INT32_MAX);
     return spinBox;
   } else {
-    eprintf("I have no idea what this is\n");
+    eprintf("seems like some unhandled type variant\n");
     // assert(false && "non-exhaustive variant");
     return nullptr; // for now
   }
@@ -1014,12 +1065,19 @@ int main(int argc, char **argv) {
 
 
 
-  const char *path = "ext/Shannon's Theorem.sm";
 
   QTabWidget w_tabs_root;
+  // -- XXX: you still need to handle the event somehow
+  w_tabs_root.setTabsClosable(true);
+  w_tabs_root.setMovable(true);
 
-  SmFileView *w_root = new SmFileView(path);
-  w_tabs_root.addTab(w_root, path);
+  const char *path1 = "ext/Shannon's Theorem.sm";
+  SmFileView *file1 = new SmFileView(path1);
+  w_tabs_root.addTab(file1, path1);
+  // const char *path2 = "ext/psychology.sm"; // -- this is multi bpm
+  const char *path2 = "ext/Yatsume Ana.sm";
+  SmFileView *file2 = new SmFileView(path2);
+  w_tabs_root.addTab(file2, path2);
 
   // -- DONE, move everything below this
 
