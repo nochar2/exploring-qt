@@ -11,6 +11,8 @@
 
 extern const std::string CHART;
 
+// NOTE: I'll store tree view expanded state into these fields, again this is not
+// that great but we'll see if we can completely bypass Qt's retained mode junk
 
 enum class GameType { DanceSingle, DanceDouble };
 enum class DiffType { Beginner, Easy, Medium, Hard, Challenge, Edit };
@@ -40,8 +42,8 @@ constexpr uint32_t BEATS_PER_MEASURE = 4; // 99.99999 % of all charts
 
 // -- memory inefficient, but we don't care. It's convenient for now!
 struct NoteRow { Array<NoteType, 4> notes; };
-struct Beat    { Array<NoteRow,48> note_rows; };
-struct Measure { Array<Beat, BEATS_PER_MEASURE> beats; };
+struct Beat    { Array<NoteRow,48> beat_rows; };
+struct Measure { Array<Beat, BEATS_PER_MEASURE> beats; bool treeview_expanded; };
 
 bool noterow_is_zero(NoteRow nr);
 
@@ -84,6 +86,9 @@ struct SmFile {
   Vector<TimeKV> bpms;
   Vector<TimeKV> stops;
   Vector<Difficulty> diffs;
+
+  bool view_metadata_expanded;
+
 };
 
 enum class SmField {

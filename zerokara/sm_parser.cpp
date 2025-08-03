@@ -53,7 +53,7 @@ size_t Difficulty::total_note_rows() {
   size_t n = 0;
   for (auto m : this->measures) {
     for (auto bt : m.beats) {
-      for (auto nr : bt.note_rows) {
+      for (auto nr : bt.beat_rows) {
         if (!noterow_is_zero(nr)) {
           n += 1;
         }
@@ -457,7 +457,7 @@ smfile_from_string_opt(string const& str)
               // -- from list of BPM changes, but point is I need to do it in zerokara.cpp also.
               // nl.sec_zero_offset = secs_per_beat * (nl.beat + nl.smticks / 48.);
               // notelines_in_this_measure += 1;
-              m.beats[beat].note_rows[smticks] = nr;
+              m.beats[beat].beat_rows[smticks] = nr;
             }
             i++;
           }

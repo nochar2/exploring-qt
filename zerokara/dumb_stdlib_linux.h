@@ -94,6 +94,7 @@ struct Array
   const T *end() const;
   T *begin() ;
   T *end() ;
+  size_t size();
 };
 
 // these have to be in a header file
@@ -112,6 +113,8 @@ T *Array<T,N>::end()   { return &storage[N]; }
 template<typename T, size_t N>
 T &Array<T,N>::operator[](size_t idx) { check_index(idx, N); return storage[idx]; }
 
+template<typename T, size_t N>
+size_t Array<T,N>::size() { return N; }
 
 
 namespace Chrono {

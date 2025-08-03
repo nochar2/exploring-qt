@@ -18,10 +18,17 @@ using namespace Qt::Literals::StringLiterals;
 #include "dumb_stdlib_linux.h"
 
 #pragma GCC poison printf
-#define eprintf(...) fprintf(stderr, __VA_ARGS__)
+#define eprintf(...)   fprintf(stderr, __VA_ARGS__)
+#define eprintfln(x, ...) eprintf(x "\n" __VA_OPT__(,) __VA_ARGS__)
 
 #include <ranges>
 using std::ranges::views::enumerate;
+
+// make C++ variants less disgusting
+#define WHEN(T,bod) if (std::holds_alternative<T>(*_vrnt)) { T _unpacked = std::get<T>(*_vrnt); bod }
+#define MATCH(val) typeof(val) *_vrnt = &val;
+
+
 
 // @structures ----------------------------------------------------------------------------------------------------
 struct NoteDisplayWidget;
@@ -228,28 +235,21 @@ double smticks_in_1_(int subdiv){return 192./subdiv;};
 
 
 
-class Cell : public QStandardItem {
-  public:
-  // -- so I can use setEditable(false) here if needed ???
-  Cell() : QStandardItem() {}
-  Cell(QString str) : QStandardItem(str) {
-    // -- TODO: second columns of rows like [Difficulties] or [0]
-    // -- are editable anyway, this should be set elsewhere probably maybe idk
-    // this->setEditable(false);
-  };
-};
+
+
 using TimeKVs      = std::vector<TimeKV>;
 using Difficulties = std::vector<Difficulty>;
 enum class SmDoubleKind { Millis, Beats, Bpm };
-struct DoubleField  { double *data; SmDoubleKind kind; };
-struct KVFields     { std::vector<TimeKV> *data; SmDoubleKind kind; };
+struct DoubleField  { double *value; const SmDoubleKind kind; };
+struct KVFields     { std::vector<TimeKV> *data; const SmDoubleKind kind; };
+// -- pointers to actual underlying SmFile fields
 using TreeValue = std::variant<
   std::string *
   , DoubleField
-  , DiffType
-  , uint32_t
-  , SmRelativePos // measure/beat/smticks
-  , NoteRow       // particular note data without pos info
+  , DiffType *
+  , uint32_t *
+  , SmRelativePos  // measure/beat/smticks
+  , NoteRow *      // particular note data without pos info
 >;
 
 Q_DECLARE_METATYPE(TreeValue);
@@ -257,11 +257,16 @@ Q_DECLARE_METATYPE(TreeValue);
 struct TreeItem { QString key; TreeValue value; };
 
 struct KVTreeModel : public QStandardItemModel {
+  // ground truth (more like in SmFile, XXX why is this not just SmFile?)
   SmFileView *sm_file_view;
-  void push_model_to_view();
-  KVTreeModel(SmFileView *sm_file_view) : QStandardItemModel(), sm_file_view(sm_file_view) {
-  }
+  
+  void rebuild_the_entire_model_from_ground_truth();
+  KVTreeModel(SmFileView *sm_file_view) : QStandardItemModel(), sm_file_view(sm_file_view) { }
+
+  // store data from editor widget to SmFile
+  bool setData(const QModelIndex &index, const QVariant &value, int role = Qt::EditRole) override;
 };
+
 
 
 struct KVTreeViewDelegate : public QStyledItemDelegate {
@@ -272,18 +277,24 @@ struct KVTreeViewDelegate : public QStyledItemDelegate {
   void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override;
 
   QWidget* createEditor (QWidget* parent, const QStyleOptionViewItem& /*option*/,  const QModelIndex& index) const override;
+  // void setEditorData(QWidget *editor, const QModelIndex &index) const override;
+  // void setModelData(QWidget *editor, QAbstractItemModel *model, const QModelIndex &index) const override;
 };
+
+
 
 
 struct SmFileView : public QWidget {
 
-  // data
+  // ground truth data
   SmFile smfile;
+
+
   SmRelativePos cur_chart_pos = {0};
   int cur_snap_nths = 16;
 
-  KVTreeModel *smfile_model;
-  KVTreeViewDelegate *smfile_view_delegate;
+  KVTreeModel *tree_model;
+  KVTreeViewDelegate *tree_view_delegate;
 
   // widgets (roughly how they're nested)
   // (maybe some of this can just leak and not be here)
@@ -363,31 +374,32 @@ void StatusBar::redraw() {
 }
 
 void NoteDisplayWidget::keyPressEvent(QKeyEvent *event) {
+
   auto pos = this->sm_file_view->cur_chart_pos;
 
-  eprintf("Key press %d\n", event->key());
+  eprintfln("Key press %d", event->key());
+
+  // -- XXX: There should be a pointer to currently active Difficulty, not 0.
+  // -- That's not implemented yet.
   NoteRow *loc = &(this
     ->sm_file_view
     ->smfile.diffs[0]
     .measures[pos.measures]
     .beats[pos.beats]
-    .note_rows[pos.smticks]
+    .beat_rows[pos.smticks]
   );
 
-  // XXX: Oh yeah. There should be a pointer to currently active Difficulty.
-  // XXX: Oh yeah, you need to locate the actual note, which might not even
-  // be in the list. Why not just do the stupidest thing and have a sparse matrix?
-  // this->sm_file_view->smfile.diffs[0]
-
-  auto k = event->key(); // this is a keysym, maybe we want a keycode for some keys
+  // -- this is a keysym, maybe a keycode for number bar keys would be nice
+  auto k = event->key();
   if ('1' <= k && k <= '4') {
-    loc->notes[k-'1'] = loc->notes[k-'1'] == NoteType::None ? NoteType::Tap : NoteType::None;
+    using enum NoteType;
+    loc->notes[k-'1'] = loc->notes[k-'1'] == None ? Tap : None;
   }
 
   // this->sm_file_view->update();
   // this->redraw();
   this->update();
-  this->sm_file_view->smfile_model->push_model_to_view();
+  this->sm_file_view->tree_model->rebuild_the_entire_model_from_ground_truth();
 }
 
 void NoteDisplayWidget::paintEvent(QPaintEvent */*event*/) {
@@ -498,7 +510,7 @@ void NoteDisplayWidget::paintEvent(QPaintEvent */*event*/) {
   Vector<NoteRowRects> rectangles;
   for (auto [me_i, me] : enumerate(v->smfile.diffs[0].measures)) {
     for (auto [bt_i, bt] : enumerate(me.beats)) {
-      for (auto [nr_i, nr] : enumerate(bt.note_rows)) {
+      for (auto [nr_i, nr] : enumerate(bt.beat_rows)) {
         if (!noterow_is_zero(nr)) {
           auto pos = (SmRelativePos){.measures=(int32_t)me_i,.beats=(int32_t)bt_i,.smticks=(double)nr_i};
           rectangles.push_back(noterow_to_rectangles(nr, pos));
@@ -582,68 +594,55 @@ void NoteDisplayWidget::wheelEvent(QWheelEvent *event) {
 
 
 
+// class Cell : public QStandardItem {
+//   public:
+//   Cell() : QStandardItem() {}
+//   Cell(QString str) : QStandardItem(str) { };
+// };
+#define Cell QStandardItem
 
 
-
-
-void KVTreeModel::push_model_to_view() {
+void KVTreeModel::rebuild_the_entire_model_from_ground_truth() {
+  // PLEASE NOTE:
+  // When you construct a Cell (QStandardItem), its constructor value is
+  // LITERALLY JUST A VISUAL STRING. NOT THE UNDERLYING DATA.
   auto v = this->sm_file_view;
 
-  clear();
+  this->clear();
   
   this->setColumnCount(2);
 
-
   // smuggle a pointer in a QVariant
-  #define PACK(x) QVariant::fromValue(TreeValue(x))
+  #define PACK(x)   QVariant::fromValue(TreeValue(x))
+  #define UNPACK(x) x.value<TreeValue>()
 
   // let's try dealing with the string fields separately beacause they are
   // annoying and there's many of them. Other types like floats vary too much
   // for abstraction to be useful.
-  std::vector<std::tuple<const char *,string>> string_fields;
-  string_fields.push_back({"#TITLE",     v->smfile.title});
-  string_fields.push_back({"#SUBTITLE",  v->smfile.subtitle});
-  string_fields.push_back({"#ARTIST",    v->smfile.artist});
+  std::vector<std::tuple<const char *,string *>> string_fields;
+  string_fields.push_back({"#TITLE",     &v->smfile.title});
+  string_fields.push_back({"#SUBTITLE",  &v->smfile.subtitle});
+  string_fields.push_back({"#ARTIST",    &v->smfile.artist});
   if (v->smfile.has_translit) {
-    string_fields.push_back({"#TITLETRANSLIT",     v->smfile.titletranslit});
-    string_fields.push_back({"#SUBTITLETRANSLIT",  v->smfile.subtitletranslit});
-    string_fields.push_back({"#ARTISTTRANSLIT",    v->smfile.artisttranslit});
+    string_fields.push_back({"#TITLETRANSLIT",     &v->smfile.titletranslit});
+    string_fields.push_back({"#SUBTITLETRANSLIT",  &v->smfile.subtitletranslit});
+    string_fields.push_back({"#ARTISTTRANSLIT",    &v->smfile.artisttranslit});
   }
-  string_fields.push_back({"#CREDIT",  v->smfile.credit});
-  string_fields.push_back({"#MUSIC",   v->smfile.music});
+  string_fields.push_back({"#CREDIT",  &v->smfile.credit});
+  string_fields.push_back({"#MUSIC",   &v->smfile.music});
 
   Cell *mtdt_cell = new Cell("Metadata");
   Cell *key_cell;
   Cell *value_cell;
 
-  // auto basic_html_sanitize = [](const std::string &s) {
-  //   std::string replaced;
-  //   for (char c : s) {
-  //     switch (c) {
-  //     case '&': replaced.append("&amp;"); break;
-  //     case '<': replaced.append("&lt;"); break;
-  //     case '>': replaced.append("&gt;"); break;
-  //     default:  replaced.push_back(c); break;
-  //     }
-  //   }
-  //   return replaced;
-  // };
-
-  for (auto [key,value] : string_fields) {
+  for (auto [key,p_value] : string_fields) {
     key_cell = new Cell(key);
-    value_cell = new Cell(QString::fromStdString(value));
-    value_cell->setData(PACK(new std::string(value)));
+    value_cell = new Cell(QString::fromStdString(*p_value)); value_cell->setData(PACK(p_value));
     mtdt_cell->appendRow({key_cell, value_cell});
   }
-
-  // this might be a bit compressible, for now idc
-  // NOTE:
-  // So, there is this unfortunate thing where you have to set your data twice:
-  // once as visual-only strings and second time for actual values that you can edit
-  // (+ instructions for QStyledItemDelegate such as spinbox steps).
-  // You have to have some mapping of SmFile fields to actual indexes of the table,
-  // and for that I just set the data field into the value itself because it's more
-  // convenient.
+  
+  // NOTE: Numeric values are not just a pointer to data. I also store the information
+  // of what type of field it is so I can decide on more reasonable step amounts for QSpinBoxes.
   
   {
     key_cell = new Cell("#OFFSET");
@@ -655,7 +654,8 @@ void KVTreeModel::push_model_to_view() {
     key_cell = new Cell("#SAMPLESTART");
     value_cell = new Cell(QString::number(v->smfile.samplestart));
     DoubleField value = {&(v->smfile.samplestart),SmDoubleKind::Millis};
-    value_cell->setData(PACK(value)); mtdt_cell->appendRow({key_cell, value_cell});
+    value_cell->setData(PACK(value));
+    mtdt_cell->appendRow({key_cell, value_cell});
   }
   {
     key_cell = new Cell("#SAMPLELENGTH");
@@ -669,7 +669,8 @@ void KVTreeModel::push_model_to_view() {
       auto *beat_cell = new Cell(QString::number(pair.beat_number));
       auto *bpm_cell  = new Cell(QString::number(pair.value));
       DoubleField value = {&pair.value, SmDoubleKind::Bpm};
-      bpm_cell->setData(PACK(value)); key_cell->appendRow({beat_cell, bpm_cell});
+      bpm_cell->setData(PACK(value));
+      key_cell->appendRow({beat_cell, bpm_cell});
     }
     mtdt_cell->appendRow(key_cell /*, value_cell */);
   }
@@ -691,7 +692,7 @@ void KVTreeModel::push_model_to_view() {
     // diffs_cell->setColumnCount(2);
 
     size_t diff_i = 0;
-    for (auto diff : v->smfile.diffs) {
+    for (auto &diff : v->smfile.diffs) {
       auto *num_cell = new Cell(QString::number(diff_i));
       num_cell->setColumnCount(1);
 
@@ -703,9 +704,10 @@ void KVTreeModel::push_model_to_view() {
       num_cell->appendRow({ct_n, ct_v});
 
       auto *dt_n = new Cell("Diff type");
-      auto *dt_v = new Cell(cstr_from_difftype(diff.diff_type));
-      DiffType dt_ptr = diff.diff_type;
-      dt_v->setData(PACK(dt_ptr));
+      // eprintfln("I'm storing this value: %d, as a pointer %p",
+      //   (int)diff.diff_type,
+      //   &diff.diff_type);
+      auto *dt_v = new Cell(cstr_from_difftype(diff.diff_type)); dt_v->setData(PACK(&diff.diff_type));
 
       QBrush brush(qcolor_from_difftype(diff.diff_type));
       // QFont font; font.setBold(true); t_difftype->setFont(1, font);
@@ -713,8 +715,7 @@ void KVTreeModel::push_model_to_view() {
       num_cell->appendRow({dt_n, dt_v});
 
       auto *dv_n = new Cell("Diff value");
-      auto *dv_v = new Cell(QString::number(diff.diff_num));
-      dv_v->setData(PACK(diff.diff_num));
+      auto *dv_v = new Cell(QString::number(diff.diff_num)); dv_v->setData(PACK(&diff.diff_num));
       num_cell->appendRow({dv_n, dv_v});
       auto *nr_n = new Cell(u"Note rows (%1)"_s.arg(diff.total_note_rows()));
       num_cell->appendRow(nr_n);
@@ -722,9 +723,13 @@ void KVTreeModel::push_model_to_view() {
       num_cell->appendRow(measures_n);
 
       auto draw_noterows_for_measure = [](Cell *t_parent, Measure *me, int32_t me_i) {
-        for (auto [bt_i, bt] : enumerate(me->beats)) {
-          for (auto [smt_i, nr] : enumerate(bt.note_rows)) {
-            if (noterow_is_zero(nr)) continue;
+        // -- I don't know how to use enumerate() here. C for loop it is.
+        for (size_t bt_i = 0; bt_i < me->beats.size(); bt_i++) {
+          Beat *bt = &me->beats[bt_i];
+          for (size_t smt_i = 0; smt_i < bt->beat_rows.size(); smt_i++) {
+            NoteRow *nr = &bt->beat_rows[smt_i];
+            
+            if (noterow_is_zero(*nr)) continue;
             
             // -- snap
             auto *t_noteline_snap = new Cell(
@@ -737,10 +742,9 @@ void KVTreeModel::push_model_to_view() {
             t_noteline_snap->setData(PACK(pos));
 
             // -- note data
-            QString line_s;
-            for (auto n : nr.notes) { line_s.push_back(notetype_to_char(n)); }
-
-            auto *t_noteline_notes = new Cell(line_s);
+            QString line_visual_string;
+            for (auto n : nr->notes) { line_visual_string.push_back(notetype_to_char(n)); }
+            auto *t_noteline_notes = new Cell(line_visual_string);
             t_noteline_notes->setData(PACK(nr));
 
             // -- alternatively, set background color:
@@ -810,13 +814,17 @@ SmFileView::SmFileView(const char *path) {
   std::string smfile_str = read_entire_file(path);
   auto smfile_opt = smfile_from_string_opt(smfile_str);
 
-  if (std::holds_alternative<SmFile>(smfile_opt)) {
-    smfile = std::get<SmFile>(smfile_opt);
-  } else {
-    auto err = std::get<SmParseError>(smfile_opt);
-    eprintf("%s\n", err.msg.c_str());
-    assert(false);
+  MATCH (smfile_opt) {
+    WHEN (SmFile,
+      smfile = _unpacked;
+    )
+    else WHEN (SmParseError, 
+      eprintfln("%s", _unpacked.msg.c_str());
+      assert(false);
+    )
+    else assert(false && "unhandled variant");
   }
+
 
   // ----------------------- build UI ------------------------------------------------
   layout_ = new QHBoxLayout(); // -- required so that it fills the entire space
@@ -828,16 +836,16 @@ SmFileView::SmFileView(const char *path) {
   
   // -- tree model of the whole file for a tree widget
   // (&smfile_model); // XXX: I don't know what was here before
-  smfile_model = new KVTreeModel(this);
-  smfile_view_delegate = new KVTreeViewDelegate(smfile_model);
+  tree_model = new KVTreeModel(this);
+  tree_view_delegate = new KVTreeViewDelegate(tree_model);
 
   // -- tree widget
 
   tree_view = new QTreeView();
-  tree_view->setModel(smfile_model);
-  tree_view->setItemDelegate(smfile_view_delegate);
+  tree_view->setModel(tree_model);
+  tree_view->setItemDelegate(tree_view_delegate);
 
-  smfile_model->push_model_to_view();
+  tree_model->rebuild_the_entire_model_from_ground_truth();
   resizable_layout->addWidget(tree_view);
 
 
@@ -880,17 +888,23 @@ SmFileView::SmFileView(const char *path) {
       // refresh itself.
       [&](const QModelIndex &index){
         if (!index.isValid()) return;
-        QStandardItem *qitem = smfile_model->itemFromIndex(index);
+        QStandardItem *qitem = tree_model->itemFromIndex(index);
         QVariant qvar = qitem->data();
-        // ew! but works for now
-        TreeValue row_var = *(TreeValue *)qvar.data();
-        if (0) {
-        } else if (std::holds_alternative<NoteRow>(row_var)) { // clicked on note data
-          // nothing for now
-        } else if (std::holds_alternative<SmRelativePos>(row_var)) { // clicked on a measure
-          auto new_pos = std::get<SmRelativePos>(row_var);
-          cur_chart_pos = new_pos;
+        TreeValue row_var = UNPACK(qvar);
+
+        MATCH (row_var) {
+          WHEN(SmRelativePos, // clicked on a measure
+            cur_chart_pos = _unpacked;
+          )
         }
+        // if (0) {
+        // } else if (std::holds_alternative<NoteRow *>(row_var)) { // clicked on note data
+        //   // nothing for now
+        // } else if (std::holds_alternative<SmRelativePos>(row_var)) { // clicked on a measure
+        //   auto new_pos = std::get<SmRelativePos>(row_var);
+        //   cur_chart_pos = new_pos;
+        // }
+        
         status_bar->redraw();
         preview_actual->update();
       }
@@ -940,107 +954,191 @@ SmFileView::SmFileView(const char *path) {
 void KVTreeViewDelegate::paint
 (QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const
 {
+  // eprintf("In paint(), ");
 
   QStandardItem *item = model->itemFromIndex(index);
 
   QStyleOptionViewItem option_ = option;
   initStyleOption(&option_, index);
   QVariant qdata = item->data();
-  TreeValue data = qdata.value<TreeValue>();
+  TreeValue data = UNPACK(qdata);
 
-  if (std::holds_alternative<SmRelativePos>(data)) {
-    // -- Copied from StackOverflow, no idea. Needed if you want rich text rendering
-    // -- for field text where different words have different colors
-    painter->save();
+  MATCH (data) {
+    WHEN (SmRelativePos, {
+      (void)_unpacked;
+      // -- Copied from StackOverflow, no idea. Needed if you want rich text rendering
+      // -- for field text where different words have different colors
+      painter->save();
 
-    QTextDocument doc;
-    doc.setHtml(option_.text);
+      QTextDocument doc;
+      doc.setHtml(option_.text);
 
-    option_.text = "";
-    option_.widget->style()->drawControl(QStyle::CE_ItemViewItem, &option_, painter);
+      option_.text = "";
+      option_.widget->style()->drawControl(QStyle::CE_ItemViewItem, &option_, painter);
 
-    painter->translate(option_.rect.left(), option_.rect.top());
-    QRect clip(0, 0, option_.rect.width(), option_.rect.height());
-    doc.drawContents(painter, clip);
+      painter->translate(option_.rect.left(), option_.rect.top());
+      QRect clip(0, 0, option_.rect.width(), option_.rect.height());
+      doc.drawContents(painter, clip);
 
-    painter->restore();
-  } else {
-    // we don't want to render everything as html, the subtitle of Yatsume Ana is <!>
-    // which would be an html fragment (and you can't easily escape this)
-    QStyledItemDelegate::paint(painter, option, index);
+      painter->restore();
+    })
+    else WHEN (DiffType *, {
+      // -- draw DiffType colored
+      DiffType *dt = _unpacked;
+    
+      painter->save();
+      QPen pen(qcolor_from_difftype(*dt));
+      painter->setPen(pen);
+      QStyledItemDelegate::paint(painter, option, index);
+      painter->restore();
+    })
+    else {
+      // eprintfln("we're painting something else");
+      // -- we don't want to render everything as html, the subtitle of Yatsume Ana is <!>
+      // -- which would be an html fragment (and you can't easily escape this)
+      QStyledItemDelegate::paint(painter, option, index);
+    }
   }
 }
 
 QWidget* KVTreeViewDelegate::createEditor
 (QWidget* parent, const QStyleOptionViewItem& /*option*/,  const QModelIndex& index) const
 {
-  eprintf("createEditor called | getting item from index %d\n", index.row());
+  eprintfln("createEditor called | getting item from index %d", index.row());
   QStandardItem *item = model->itemFromIndex(index);
   eprintf("it has %d columns, and ", item->columnCount());
 
   assert(item);
   QVariant qdata = item->data();
-  TreeValue data = qdata.value<TreeValue>();
+  TreeValue data = UNPACK(qdata);
 
-  // another non-exhaustive dispatch
-  if (0) {
-  } else if (std::holds_alternative<DiffType>(data)) {
-    eprintf("seems like difftype to me\n");
-    QComboBox *combo = new QComboBox(parent);
-    for (const char *cs : difftype_cstrs) { combo->addItem(cs); }
-    return combo;
-  } else if (std::holds_alternative<std::string *>(data)) {
-    std::string *s = std::get<std::string *>(data);
-    // in fields where there are no data, it thinks it's
-    // a std::string * (but null)
-    if (s == nullptr) {
-      eprintf("seems like nothing to me\n"); return nullptr;
-    }
-    eprintf("seems like string %s to me\n", s->c_str());
-    std::string str = *s;
-    auto *lineEdit = new QLineEdit(parent);
-    lineEdit->setText(QString::fromStdString(str));
-    return lineEdit;
-  } else if (std::holds_alternative<DoubleField>(data)) {
-    eprintf("seems like double to me\n");
-    auto ff = std::get<DoubleField>(data);
-    auto *doubleSpinBox = new QDoubleSpinBox(parent);
+  MATCH (data) {
+    if (0) {}
+    else WHEN (DiffType *,
+      eprintfln("... seems like difftype to me");
+      QComboBox *combo = new QComboBox(parent);
+      for (const char *cs : difftype_cstrs) { combo->addItem(cs); }
+      combo->setCurrentIndex((int)*_unpacked);
+      return combo;
+    )
+    else WHEN(std::string *, 
+      // in some fields there are no data, it thinks it's a std::string * (but null)
+      if (_unpacked == nullptr) {
+        eprintfln("... seems like nothing to me"); return nullptr;
+      }
+      eprintfln("seems like string %s to me", _unpacked->c_str());
+      std::string str = *_unpacked;
+      auto *lineEdit = new QLineEdit(parent);
+      lineEdit->setText(QString::fromStdString(str));
+      return lineEdit;
+    )
+    else WHEN (DoubleField, 
+      eprintfln("seems like double to me");
+      auto *doubleSpinBox = new QDoubleSpinBox(parent);
 
-    // TODO: I don't know how to deal with Shift here
-    switch (ff.kind) {
-      case SmDoubleKind::Millis:
-        doubleSpinBox->setSingleStep(0.01);
-        doubleSpinBox->setDecimals(3);
-        doubleSpinBox->setMinimum(-50000);
-        doubleSpinBox->setMaximum(100000); // -- this depends
-        break;
-      case SmDoubleKind::Beats:
-        doubleSpinBox->setSingleStep(1);
-        doubleSpinBox->setDecimals(2);
-        doubleSpinBox->setMinimum(0);
-        doubleSpinBox->setMaximum(100000); // -- this depends
-        break;
-      case SmDoubleKind::Bpm:
-        doubleSpinBox->setSingleStep(1);
-        doubleSpinBox->setDecimals(2);
-        doubleSpinBox->setMinimum(1);     // don't care about negbpms
-        doubleSpinBox->setMaximum(10000); // -- this depends
-        break;
+      // TODO: I don't know how to deal with Shift here
+      switch (_unpacked.kind) {
+        case SmDoubleKind::Millis:
+          doubleSpinBox->setSingleStep(0.01);
+          doubleSpinBox->setDecimals(3);
+          doubleSpinBox->setMinimum(-50000);
+          doubleSpinBox->setMaximum(100000); // -- this depends
+          break;
+        case SmDoubleKind::Beats:
+          doubleSpinBox->setSingleStep(1);
+          doubleSpinBox->setDecimals(2);
+          doubleSpinBox->setMinimum(0);
+          doubleSpinBox->setMaximum(100000); // -- this depends
+          break;
+        case SmDoubleKind::Bpm:
+          doubleSpinBox->setSingleStep(1);
+          doubleSpinBox->setDecimals(2);
+          doubleSpinBox->setMinimum(1);     // don't care about negbpms
+          doubleSpinBox->setMaximum(10000); // -- this depends
+          break;
+      }
+      return doubleSpinBox;
+    )
+    else WHEN(uint32_t *, 
+      (void)_unpacked;
+      eprintfln("seems like uint32_t to me");
+      auto *spinBox = new QSpinBox(parent);
+      // -- it wants int, UINT32_MAX would be -1
+      // -- TODO: check if Etterna needs minimum 1? never seen a chart with a 0
+      spinBox->setMaximum(INT32_MAX);
+      return spinBox;
+    )
+    else {
+      eprintfln("seems like some unhandled type variant");
+      // assert(false && "non-exhaustive variant");
+      return nullptr; // for now
     }
-    return doubleSpinBox;
-  } else if (std::holds_alternative<uint32_t>(data)) {
-    eprintf("seems like uint32_t to me\n");
-    auto *spinBox = new QSpinBox(parent);
-    // -- it wants int, UINT32_MAX would be -1
-    // -- TODO: check if Etterna needs minimum 1? never seen a chart with a 0
-    spinBox->setMaximum(INT32_MAX);
-    return spinBox;
-  } else {
-    eprintf("seems like some unhandled type variant\n");
-    // assert(false && "non-exhaustive variant");
-    return nullptr; // for now
-  }
+  } // MATCH
+  assert(false);
 }
+
+
+DiffType difftype_from_qstr(const QString str)
+{
+  using enum DiffType;
+  if (str == "Beginner")  return Beginner;
+  if (str == "Easy")      return Easy;
+  if (str == "Medium")    return Medium;
+  if (str == "Hard")      return Hard;
+  if (str == "Challenge") return Challenge;
+  if (str == "Edit")      return Edit;
+  assert(false);
+}
+
+
+bool 
+KVTreeModel::setData(const QModelIndex &index, const QVariant &value, int role) {
+  assert(role == Qt::EditRole);
+  QStandardItem *target_cell = this->itemFromIndex(index);
+
+  //   std::string *
+  // , DoubleField
+  // , DiffType *
+  // , uint32_t *
+  // , SmRelativePos  // measure/beat/smticks (not editable)
+  // , NoteRow *      // particular note data without pos info (not editable right now)
+
+
+  TreeValue target_data = UNPACK(target_cell->data());
+  MATCH(target_data) {
+    if (0) {}
+    else WHEN(std::string *,
+      QString edit_result = value.value<QString>();
+      *_unpacked = edit_result.toStdString();
+    )
+    else WHEN(DoubleField,
+      double edit_result = value.value<double>();
+      *(_unpacked.value) = edit_result;
+    )
+    else WHEN(DiffType *,
+      QString edit_result_s = value.value<QString>();
+      DiffType edit_result = difftype_from_qstr(edit_result_s);
+      eprintf("I'm setting the fucking actual diff type to %s\n", cstr_from_difftype(edit_result));
+      *_unpacked = edit_result;
+    )
+    else WHEN(uint32_t *,
+      int edit_result = value.value<int>();
+      assert(edit_result >= 0);
+      *_unpacked = (uint32_t)edit_result;
+    )
+    else {
+      eprintfln("Warning: unhandled edit type, the new value will not be set");
+      return false;
+    }
+  }
+  // -- XXX: THIS IS WROOOOOOOOOOOONG!!!!!!!
+  // -- But I hate retained mode GUIs and this works somewhat for now
+  // -- (it screws up scroll positions and expand states)
+  this->rebuild_the_entire_model_from_ground_truth();
+  return true;
+}
+
+
 
 struct MainWindow : public QMainWindow {
   QTabWidget w_tabs_root;
@@ -1083,7 +1181,7 @@ struct MainWindow : public QMainWindow {
       if (fileName != nullptr) {
         std::string std_fileName = fileName.toStdString();
         const char *c_fileName = std_fileName.c_str();
-        eprintf("chosen file name: %s\n", c_fileName);
+        eprintfln("chosen file name: %s", c_fileName);
 
         // SmFileView *file = new SmFileView(c_fileName);
         // assert(file != nullptr);
@@ -1113,7 +1211,7 @@ __attribute__((noreturn))
 void *exec_yourself(void *arg) {
   int inotify_fd = *(int *)arg;
   char dontcare[1];
-  eprintf("\nI: The app will be restarted when the ./zerokara binary changes.\n");
+  eprintfln("\nI: The app will be restarted when the ./zerokara binary changes.");
   while(1) { // -- spam while the binary is momentarily gone
     ssize_t read_bytes = read(inotify_fd, dontcare, 1);             (void)(read_bytes);
     int minusone_on_fail = execl("./zerokara", "./zerokara", NULL); (void)(minusone_on_fail);
