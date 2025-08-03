@@ -616,22 +616,22 @@ void KVTreeModel::push_model_to_view() {
   Cell *key_cell;
   Cell *value_cell;
 
-  auto basic_html_sanitize = [](const std::string &s) {
-    std::string replaced;
-    for (char c : s) {
-      switch (c) {
-      case '&': replaced.append("&amp;"); break;
-      case '<': replaced.append("&lt;"); break;
-      case '>': replaced.append("&gt;"); break;
-      default:  replaced.push_back(c); break;
-      }
-    }
-    return replaced;
-  };
+  // auto basic_html_sanitize = [](const std::string &s) {
+  //   std::string replaced;
+  //   for (char c : s) {
+  //     switch (c) {
+  //     case '&': replaced.append("&amp;"); break;
+  //     case '<': replaced.append("&lt;"); break;
+  //     case '>': replaced.append("&gt;"); break;
+  //     default:  replaced.push_back(c); break;
+  //     }
+  //   }
+  //   return replaced;
+  // };
 
   for (auto [key,value] : string_fields) {
     key_cell = new Cell(key);
-    value_cell = new Cell(QString::fromStdString(basic_html_sanitize(value)));
+    value_cell = new Cell(QString::fromStdString(value));
     value_cell->setData(PACK(new std::string(value)));
     mtdt_cell->appendRow({key_cell, value_cell});
   }
@@ -937,28 +937,38 @@ SmFileView::SmFileView(const char *path) {
 }
 
 
-// -- Copied from StackOverflow, no idea. Needed if you want rich text rendering
-// -- for field text where different words have different colors
 void KVTreeViewDelegate::paint
 (QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const
 {
 
+  QStandardItem *item = model->itemFromIndex(index);
+
   QStyleOptionViewItem option_ = option;
   initStyleOption(&option_, index);
+  QVariant qdata = item->data();
+  TreeValue data = qdata.value<TreeValue>();
 
-  painter->save();
+  if (std::holds_alternative<SmRelativePos>(data)) {
+    // -- Copied from StackOverflow, no idea. Needed if you want rich text rendering
+    // -- for field text where different words have different colors
+    painter->save();
 
-  QTextDocument doc;
-  doc.setHtml(option_.text);
+    QTextDocument doc;
+    doc.setHtml(option_.text);
 
-  option_.text = "";
-  option_.widget->style()->drawControl(QStyle::CE_ItemViewItem, &option_, painter);
+    option_.text = "";
+    option_.widget->style()->drawControl(QStyle::CE_ItemViewItem, &option_, painter);
 
-  painter->translate(option_.rect.left(), option_.rect.top());
-  QRect clip(0, 0, option_.rect.width(), option_.rect.height());
-  doc.drawContents(painter, clip);
+    painter->translate(option_.rect.left(), option_.rect.top());
+    QRect clip(0, 0, option_.rect.width(), option_.rect.height());
+    doc.drawContents(painter, clip);
 
-  painter->restore();
+    painter->restore();
+  } else {
+    // we don't want to render everything as html, the subtitle of Yatsume Ana is <!>
+    // which would be an html fragment (and you can't easily escape this)
+    QStyledItemDelegate::paint(painter, option, index);
+  }
 }
 
 QWidget* KVTreeViewDelegate::createEditor
