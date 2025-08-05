@@ -100,11 +100,13 @@ const char *difftype_to_cstr(DiffType dt)
   return difftype_cstrs[idx];
 }
 
-// TODO: is there a better way ???
-Array<GameType,2> gametypes
-= {
-  GameType::DanceSingle, GameType::DanceDouble
-};
+
+using enum GameType;
+using enum DiffType;
+using enum NoteType;
+
+Array<GameType,2> gametypes = { DanceSingle, DanceDouble };
+Array<DiffType,6> difftypes = { Beginner,Easy,Medium,Hard,Challenge,Edit };
 
 int gametype_to_keycount(GameType gt)
 {

@@ -1,5 +1,6 @@
 // @includes -----------------------------------------------------------------------------------------------------------------
 
+#include "qcolor.h"
 #include <string>
 using std::string;
 
@@ -152,18 +153,18 @@ QColor smticks_to_qcolor(double smticks) {
   std::vector<std::pair<uint32_t,QColor>> snap_to_color = {
     { (192/4),  QColorConstants::Red },
     { (192/8),  QColorConstants::Blue },
-    { (192/12), QColorConstants::Green },
-    { (192/16), QColorConstants::Yellow },
+    { (192/12), QColorConstants::Svg::lawngreen },   // less eyesore than green
+    { (192/16), QColorConstants::Svg::gold },        // less eyesore than yellow
     { (192/24), QColorConstants::DarkMagenta },
-    { (192/32), QColorConstants::Svg::orange },
-    { (192/48), QColorConstants::Cyan },
+    { (192/32), QColorConstants::Svg::darkorange },  // orange and gold are too similar
+    { (192/48), QColorConstants::Svg::deepskyblue }, // less eyesore than cyan
   };
   for (auto [s,c] : snap_to_color) {
     if (std::fmod(smticks, s) == 0) return c;
   }
   return QColorConstants::Gray;
 }
-const char *smticks_to_cstr(double smticks) {
+const char *smticks_to_cstr_color(double smticks) {
   if (std::fmod(smticks, 48/1) == 0) return "red";
   if (std::fmod(smticks, 48/2) == 0) return "blue";
   if (std::fmod(smticks, 48/3) == 0) return "green";
@@ -200,16 +201,6 @@ const char *snap_to_cstr_color (int snap) {
     default: return "";
   }
 }
-
-// this should go to hell
-// std::array<NoteType, 4> string_to_notes(const char str[4]) {
-//   std::array<NoteType, 4> ret = {};
-//   ret[0] = static_cast<NoteType>(str[0]);
-//   ret[1] = static_cast<NoteType>(str[1]);
-//   ret[2] = static_cast<NoteType>(str[2]);
-//   ret[3] = static_cast<NoteType>(str[3]);
-//   return ret;
-// }
 
 // 20 and 28 are still useful sometimes, but maybe that should be in some checkbox
 int sm_sane_snap_higher_than(int snap) {
@@ -265,8 +256,9 @@ struct KVTreeModel : public QStandardItemModel {
   void rebuild_the_entire_model_from_ground_truth();
   KVTreeModel(SmFileView *sm_file_view) : QStandardItemModel(), sm_file_view(sm_file_view) { }
 
-  // store data from editor widget to SmFile
-  bool setData(const QModelIndex &index, const QVariant &value, int role = Qt::EditRole) override;
+  // -- no longer needed
+  // bool setItemData(const QModelIndex &index, const QMap<int,QVariant> &values) override;
+  // bool setData(const QModelIndex &index, const QVariant &value, int role = Qt::EditRole) override;
 };
 
 
@@ -280,8 +272,9 @@ struct KVTreeViewDelegate : public QStyledItemDelegate {
 
   QWidget* createEditor (QWidget* parent, const QStyleOptionViewItem& /*option*/,  const QModelIndex& index) const override;
   // void setEditorData(QWidget *editor, const QModelIndex &index) const override;
-  // void setModelData(QWidget *editor, QAbstractItemModel *model, const QModelIndex &index) const override;
+  void setModelData(QWidget *editor, QAbstractItemModel *model, const QModelIndex &index) const override;
 };
+
 
 
 
@@ -760,7 +753,7 @@ void KVTreeModel::rebuild_the_entire_model_from_ground_truth() {
               u"%1/%2/<span style='color: %4; font-weight: 600;'>%3</span>"_s
               // u"%1/%2/%3"_s
               .arg(me_i).arg(bt_i).arg(smt_i)
-              .arg(smticks_to_cstr(smt_i))
+              .arg(smticks_to_cstr_color(smt_i))
             );
             SmRelativePos pos = {.measures=(int32_t)me_i, .beats=(int32_t)bt_i, .smticks=(double)smt_i};
             t_noteline_snap->setData(PACK(pos));
@@ -1045,6 +1038,12 @@ struct MyValidator : public QRegularExpressionValidator {
   }
 };
 
+
+// -- xxx: I thought this works??? why does it not?
+Q_DECLARE_METATYPE(GameType);
+Q_DECLARE_METATYPE(DiffType);
+Q_DECLARE_METATYPE(NoteType);
+
 QWidget* KVTreeViewDelegate::createEditor
 (QWidget* parent, const QStyleOptionViewItem& /*option*/,  const QModelIndex& index) const
 {
@@ -1066,7 +1065,7 @@ QWidget* KVTreeViewDelegate::createEditor
           .arg(gametype_to_cstr(gt))
           .arg(gametype_to_keycount(gt))
         ;
-        combo->addItem(str);
+        combo->addItem(str, QVariant::fromValue(gt));
       }
       combo->setCurrentIndex((int)*_unpacked);
       return combo;
@@ -1074,7 +1073,10 @@ QWidget* KVTreeViewDelegate::createEditor
     else WHEN (DiffType *,
       eprintfln("... seems like difftype to me");
       QComboBox *combo = new QComboBox(parent);
-      for (const char *cs : difftype_cstrs) { combo->addItem(cs); }
+      for (DiffType dt : difftypes) {
+        const char *cstr = difftype_to_cstr(dt);
+        combo->addItem(QString(cstr), QVariant::fromValue(dt));
+      }
       combo->setCurrentIndex((int)*_unpacked);
       return combo;
     )
@@ -1119,6 +1121,7 @@ QWidget* KVTreeViewDelegate::createEditor
     else WHEN(uint32_t *, 
       (void)_unpacked;
       eprintfln("seems like uint32_t to me");
+
       auto *spinBox = new QSpinBox(parent);
       // -- it wants int, UINT32_MAX would be -1
       // -- TODO: check if Etterna needs minimum 1? never seen a chart with a 0
@@ -1129,7 +1132,7 @@ QWidget* KVTreeViewDelegate::createEditor
     else WHEN(NoteRow *,
       (void)_unpacked;
       eprintfln("seems like a noterow to me");
-      // TODO: does this have to be new-ed?
+
       auto *editor = new QLineEdit(parent);
       editor->setMaxLength(4);
 
@@ -1153,16 +1156,6 @@ QWidget* KVTreeViewDelegate::createEditor
 }
 
 
-// SIGHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH why are these QStrings?
-// isn't the job of the validator to convert it to the narrower
-// data type so I don't have to do this again????????????
-GameType qstr_to_gametype(const QString &str)
-{
-  using enum GameType;
-  if (str == "dance-single (4 keys)") return DanceSingle;
-  if (str == "dance-double (8 keys)") return DanceDouble;
-  assert(false);
-}
 NoteRow qstr_to_noterow(const QString &str)
 {
   eprintfln("length is %lld\n", str.size());
@@ -1173,79 +1166,49 @@ NoteRow qstr_to_noterow(const QString &str)
   }
   return nr;
 }
-DiffType qstr_to_difftype(const QString &str)
-{
-  using enum DiffType;
-  if (str == "Beginner")  return Beginner;
-  if (str == "Easy")      return Easy;
-  if (str == "Medium")    return Medium;
-  if (str == "Hard")      return Hard;
-  if (str == "Challenge") return Challenge;
-  if (str == "Edit")      return Edit;
-  assert(false);
-}
 
 
-bool 
-KVTreeModel::setData(const QModelIndex &index, const QVariant &value, int role) {
-  assert(role == Qt::EditRole);
-  QStandardItem *target_cell = this->itemFromIndex(index);
+void KVTreeViewDelegate::setModelData(QWidget *editor, QAbstractItemModel *model, const QModelIndex &index) const {
+  (void)model;
+  eprintfln("in setModelData()");
+  QStandardItem *item = this->model->itemFromIndex(index);
+  QVariant target_qv = item->data();
+  TreeValue target_v = target_qv.value<TreeValue>();
 
-  //   std::string *
-  // , DoubleField
-  // , DiffType *
-  // , uint32_t *
-  // , SmRelativePos  // measure/beat/smticks (not editable)
-  // , NoteRow *      // particular note data without pos info (not editable right now)
-
-
-  TreeValue target_data = UNPACK(target_cell->data());
-  MATCH(target_data) {
+  MATCH(target_v) {
     if (0) {}
-    else WHEN(std::string *,
-      QString edit_result = value.value<QString>();
-      *_unpacked = edit_result.toStdString();
-    )
-    else WHEN(DoubleField,
-      double edit_result = value.value<double>();
-      *(_unpacked.value) = edit_result;
-    )
+    else WHEN(std::string *, {
+      QLineEdit *lineEdit = qobject_cast<QLineEdit *>(editor);
+      *_unpacked = lineEdit->text().toStdString();
+    })
+    else WHEN(GameType *, {
+      QComboBox *comboBox = qobject_cast<QComboBox *>(editor);
+      GameType edit_result =  comboBox->itemData(comboBox->currentIndex()).value<GameType>();
+      *_unpacked = edit_result;
+    })
     else WHEN(DiffType *,
-      QString edit_result_s = value.value<QString>();
-      DiffType edit_result = qstr_to_difftype(edit_result_s);
-      eprintfln("I'm setting the fucking actual diff type to %s", difftype_to_cstr(edit_result));
+      QComboBox *comboBox = qobject_cast<QComboBox *>(editor);
+      DiffType edit_result = comboBox->itemData(comboBox->currentIndex()).value<DiffType>();
       *_unpacked = edit_result;
     )
-    else WHEN(uint32_t *,
-      int edit_result = value.value<int>();
-      assert(edit_result >= 0);
-      *_unpacked = (uint32_t)edit_result;
+    else WHEN(DoubleField,
+      QDoubleSpinBox *spinBox = qobject_cast<QDoubleSpinBox *>(editor);
+      *(_unpacked.value) = spinBox->value();
     )
-    else WHEN(GameType *,
-      // -- XXX: this is stupid, why should I have to distinguish
-      // -- between dance-single and dance-single (4 keys)? Isn't there
-      // -- some better way to set the data?
-      QString edit_result_s = value.value<QString>();
-
-      // -- also, at this point you want to blow everything away
-      // -- and start assuming different column count which is another
-      // -- wasp nest
-      *_unpacked = qstr_to_gametype(edit_result_s);
+    else WHEN(uint32_t *,
+      QSpinBox *spinBox = qobject_cast<QSpinBox *>(editor);
+      *_unpacked = spinBox->value();
     )
     else WHEN(NoteRow *,
-      QString edit_result_s = value.value<QString>();
-      *_unpacked = qstr_to_noterow(edit_result_s);
+      QLineEdit *lineEdit = qobject_cast<QLineEdit *>(editor);
+      NoteRow nr = qstr_to_noterow(lineEdit->text());
+      *_unpacked = nr;
     )
     else {
       eprintfln("Warning: unhandled edit type, the new value will not be set");
-      return false;
     }
   }
-  // -- XXX: THIS IS WROOOOOOOOOOOONG!!!!!!!
-  // -- But I hate retained mode GUIs and this works somewhat for now
-  // -- (it screws up scroll positions and expand states)
-  this->rebuild_the_entire_model_from_ground_truth();
-  return true;
+  this->model->rebuild_the_entire_model_from_ground_truth();
 }
 
 

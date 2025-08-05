@@ -17,6 +17,8 @@ extern const std::string CHART;
 enum class GameType { DanceSingle, DanceDouble };
 extern Array<GameType,2> gametypes;
 enum class DiffType { Beginner, Easy, Medium, Hard, Challenge, Edit };
+extern Array<DiffType, 6> difftypes;
+
 std::string difftype_to_string(DiffType dt);
 std::string gametype_to_string(GameType gt);
 int gametype_to_keycount(GameType gt);
