@@ -15,14 +15,18 @@ extern const std::string CHART;
 // that great but we'll see if we can completely bypass Qt's retained mode junk
 
 enum class GameType { DanceSingle, DanceDouble };
+extern Array<GameType,2> gametypes;
 enum class DiffType { Beginner, Easy, Medium, Hard, Challenge, Edit };
-std::string string_from_difftype(DiffType dt);
-std::string string_from_gametype(GameType gt);
+std::string difftype_to_string(DiffType dt);
+std::string gametype_to_string(GameType gt);
+int gametype_to_keycount(GameType gt);
+const char *gametype_to_cstr(GameType gt);
 
 
 // I could store '0', '1' etc., but then what would other memory
 // values mean?
 enum class NoteType : char { None,Tap,Hold,HRLift,Rolld,Mine,Lift,Fake };
+
 NoteType char_to_notetype(char c);
 char notetype_to_char(NoteType nt);
 
@@ -102,10 +106,10 @@ struct SmParseError {
 };
 
 std::variant<SmFile, SmParseError>
-smfile_from_string_opt(std::string const& str);
+string_to_smfile_opt(std::string const& str);
 
-const char *cstr_from_gametype(GameType gt);
-const char *cstr_from_difftype(DiffType gt);
+const char *gametype_to_cstr(GameType gt);
+const char *difftype_to_cstr(DiffType gt);
 extern Array<const char *, 6> difftype_cstrs;
 
 #endif

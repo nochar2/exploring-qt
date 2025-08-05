@@ -94,17 +94,34 @@ Array<const char *, 6> difftype_cstrs = {
   {"Beginner", "Easy", "Medium", "Hard", "Challenge", "Edit"}
 };
 
-const char *cstr_from_difftype(DiffType dt)
+const char *difftype_to_cstr(DiffType dt)
 {
   size_t idx = (size_t)dt;
   return difftype_cstrs[idx];
 }
 
-const char *cstr_from_gametype(GameType gt)
+// TODO: is there a better way ???
+Array<GameType,2> gametypes
+= {
+  GameType::DanceSingle, GameType::DanceDouble
+};
+
+int gametype_to_keycount(GameType gt)
 {
+  using enum GameType;
   switch (gt) {
-    case GameType::DanceSingle: return "dance-single (4 keys)";
-    case GameType::DanceDouble: return "dance-double (8 keys)";
+    case DanceSingle: return 4;
+    case DanceDouble: return 8;
+  }
+  assert(false);
+}
+
+const char *gametype_to_cstr(GameType gt)
+{
+  using enum GameType;
+  switch (gt) {
+    case DanceSingle: return "dance-single";
+    case DanceDouble: return "dance-double";
   }
   assert(false);
 }
@@ -145,7 +162,7 @@ const std::string CHART = ""
 
 // use holds_alternative for destructuring
 std::variant<SmFile, SmParseError>
-smfile_from_string_opt(string const& str)
+string_to_smfile_opt(string const& str)
 {
   // -- HACK: make float conversions not break on non-English locales.
   // -- for some reason, setting this right after main() doesn't work, and none of

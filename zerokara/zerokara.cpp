@@ -77,8 +77,8 @@ struct StatusBar : public QWidget {
   void redraw();
 };
 
-struct NoteRowRects {
-  std::vector<QRectF> rects; // 0 up to 4
+struct NoteRowRect {
+  QRectF rect; // 0 up to 4
   QColor color;
 };
 
@@ -90,9 +90,9 @@ struct SmRelativePos {
   static SmRelativePos incremented_by(SmRelativePos pos, double how_many_smticks) {
     pos.smticks += how_many_smticks;
     if (pos.smticks < 0) {
-      double n_borrows_from_beats = std::ceil(-(pos.smticks / 48.));
-      pos.beats -= (int)n_borrows_from_beats;
-      pos.smticks += 48.0 * n_borrows_from_beats;
+      double beats_to_n_borrows = std::ceil(-(pos.smticks / 48.));
+      pos.beats -= (int)beats_to_n_borrows;
+      pos.smticks += 48.0 * beats_to_n_borrows;
       assert(pos.smticks >= 0);
     }
     if (pos.smticks >= 48.) {
@@ -129,7 +129,7 @@ struct SmRelativePos {
 
 
 
-QColor qcolor_from_difftype(DiffType dt)
+QColor difftype_to_qcolor(DiffType dt)
 {
   switch (dt) {
     case DiffType::Beginner:  return QColorConstants::DarkCyan;
@@ -142,10 +142,10 @@ QColor qcolor_from_difftype(DiffType dt)
   assert(false);
 }
 
-const char *cstr_color_from_snap (int snap);
+const char *snap_to_cstr_color (int snap);
 
 // -- I might want to unify these two maybe ???
-QColor qcolor_from_smticks(double smticks) {
+QColor smticks_to_qcolor(double smticks) {
   assert(smticks <= 48.0);
   if (smticks == 48.0) smticks = 0.0; // can happen due to rounding up
 
@@ -163,7 +163,7 @@ QColor qcolor_from_smticks(double smticks) {
   }
   return QColorConstants::Gray;
 }
-const char *cstr_from_smticks(double smticks) {
+const char *smticks_to_cstr(double smticks) {
   if (std::fmod(smticks, 48/1) == 0) return "red";
   if (std::fmod(smticks, 48/2) == 0) return "blue";
   if (std::fmod(smticks, 48/3) == 0) return "green";
@@ -187,7 +187,7 @@ bool smtick_is_sane(double smtick, int cur_snap_nths) {
 }
 
 // this is for the Snap xx highlight
-const char *cstr_color_from_snap (int snap) {
+const char *snap_to_cstr_color (int snap) {
   switch (snap) {
     case 1: case 2: case 4: return "red";
     case 8: return "blue";
@@ -201,14 +201,15 @@ const char *cstr_color_from_snap (int snap) {
   }
 }
 
-std::array<NoteType, 4> notes_from_string(const char str[4]) {
-  std::array<NoteType, 4> ret = {};
-  ret[0] = static_cast<NoteType>(str[0]);
-  ret[1] = static_cast<NoteType>(str[1]);
-  ret[2] = static_cast<NoteType>(str[2]);
-  ret[3] = static_cast<NoteType>(str[3]);
-  return ret;
-}
+// this should go to hell
+// std::array<NoteType, 4> string_to_notes(const char str[4]) {
+//   std::array<NoteType, 4> ret = {};
+//   ret[0] = static_cast<NoteType>(str[0]);
+//   ret[1] = static_cast<NoteType>(str[1]);
+//   ret[2] = static_cast<NoteType>(str[2]);
+//   ret[3] = static_cast<NoteType>(str[3]);
+//   return ret;
+// }
 
 // 20 and 28 are still useful sometimes, but maybe that should be in some checkbox
 int sm_sane_snap_higher_than(int snap) {
@@ -246,6 +247,7 @@ struct KVFields     { std::vector<TimeKV> *data; const SmDoubleKind kind; };
 using TreeValue = std::variant<
   std::string *
   , DoubleField
+  , GameType *
   , DiffType *
   , uint32_t *
   , SmRelativePos  // measure/beat/smticks
@@ -361,7 +363,7 @@ void StatusBar::redraw() {
 
   this->label_snap.setText(
     QString("| Snap <span style='color: %1; font-weight: 600;'>%2</span>")
-    .arg(cstr_color_from_snap(v->cur_snap_nths))
+    .arg(snap_to_cstr_color(v->cur_snap_nths))
     .arg(v->cur_snap_nths)
   );
 
@@ -463,8 +465,8 @@ void NoteDisplayWidget::paintEvent(QPaintEvent */*event*/) {
       // -- There should be some checkbox somewhere if we want smticks to be int
       // -- or float and only quantized on save. We don't want to break existing
       // -- 28th colored streams for example.
-      // QColor color = qcolor_from_smticks((int32_t)roundl(s->smticks));
-      QColor color = qcolor_from_smticks(s->smticks);
+      // QColor color = smticks_to_qcolor((int32_t)roundl(s->smticks));
+      QColor color = smticks_to_qcolor(s->smticks);
       color.setAlphaF(.6f);
       pen.setColor(color);
       pen.setWidth(
@@ -482,38 +484,53 @@ void NoteDisplayWidget::paintEvent(QPaintEvent */*event*/) {
   }
 
 
+  // NOTE: temporarily
+  using NoteRowRects = std::array<NoteRowRect, 4>;
   std::function<NoteRowRects(NoteRow,SmRelativePos)>
   noterow_to_rectangles = [&](NoteRow row, SmRelativePos pos)
   {
+    using enum NoteType;
+    
     // replace this if we encounter a non-4/4 file
     uint32_t global_smticks
       = (uint32_t)pos.smticks + (uint32_t)pos.beats * 48 + (uint32_t)pos.measures * 48 * 4;
 
-    auto line = (NoteRowRects){
-      .rects = {},
-      .color = qcolor_from_smticks(pos.smticks)
-    };
+    // this assumption is wrong, we want semi-transparent fakes
+    NoteRowRects line;
 
     for (size_t i = 0; i < 4; i++) {
-      if (row.notes[i] == NoteType::Tap) {
-        line.rects.push_back(
-          QRect((int32_t)(left_start + note_width * (int32_t)i),
-                (int32_t)(px_of_measure_zero + px_per_smtick() * global_smticks),
-                note_width, note_height)
-        );
+      int x,y,w,h;
+
+      auto notetype_start_looks_like_tap = [](NoteType nt) {
+        return nt == Tap || nt == Hold || nt == Rolld || nt == Fake;
+      };
+
+      if (notetype_start_looks_like_tap(row.notes[i])) {
+        x = (int32_t)(left_start + note_width * (int32_t)i);
+        y = (int32_t)(px_of_measure_zero + px_per_smtick() * global_smticks);
+        w = note_width;
+        h = note_height;
+        line[i].rect = QRect(x,y,w,h);
+        line[i].color = smticks_to_qcolor(pos.smticks);
+        if (row.notes[i] == Fake) {
+          line[i].color.setAlphaF(0.25);
+        }
+      } else {
+        // TODO: other objects
+        // assert(false);
       }
     }
     return line;
   };
 
 
-  Vector<NoteRowRects> rectangles;
+  Vector<NoteRowRects> rectangle_rows;
   for (auto [me_i, me] : enumerate(v->smfile.diffs[0].measures)) {
     for (auto [bt_i, bt] : enumerate(me.beats)) {
       for (auto [nr_i, nr] : enumerate(bt.beat_rows)) {
         if (!noterow_is_zero(nr)) {
           auto pos = (SmRelativePos){.measures=(int32_t)me_i,.beats=(int32_t)bt_i,.smticks=(double)nr_i};
-          rectangles.push_back(noterow_to_rectangles(nr, pos));
+          rectangle_rows.push_back(noterow_to_rectangles(nr, pos));
         }
       }
     }
@@ -521,15 +538,15 @@ void NoteDisplayWidget::paintEvent(QPaintEvent */*event*/) {
 
   QRectF cont_rect = this->contentsRect();
 
-  for (auto pat : rectangles) {
-    for (auto rect : pat.rects) {
+  for (auto rectangle_row : rectangle_rows) {
+    for (auto rectangle : rectangle_row) {
       if (downscroll) {
         // printf("cont_rect h: %d, rect_y: %g, rect_h: %g\n",
         //        cont_rect.height(), rect.y(), rect.height());
-        rect.moveBottom(cont_rect.height() - rect.top());
+        rectangle.rect.moveBottom(cont_rect.height() - rectangle.rect.top());
         // printf("top y is now %g\n", rect.y());
       }
-      painter.fillRect(rect, pat.color);
+      painter.fillRect(rectangle.rect, rectangle.color);
     }
   }
 }
@@ -603,26 +620,29 @@ void NoteDisplayWidget::wheelEvent(QWheelEvent *event) {
 
 
 void KVTreeModel::rebuild_the_entire_model_from_ground_truth() {
-  // PLEASE NOTE:
-  // When you construct a Cell (QStandardItem), its constructor value is
-  // LITERALLY JUST A VISUAL STRING. NOT THE UNDERLYING DATA.
+  // -- I construct a Cell (QStandardItem) the following way:
+  // -- * the value in constructor is merely a visual string
+  // -- * the data is a pointer to actual ground truth (or wrapper with extra info)
   auto v = this->sm_file_view;
 
   this->clear();
   
   this->setColumnCount(2);
 
-  // smuggle a pointer in a QVariant
+  // -- T <-> std::variant <-> QVariant allows you to smuggle a pointer,
+  // -- which QVariant doesn't like for some reason.
   #define PACK(x)   QVariant::fromValue(TreeValue(x))
   #define UNPACK(x) x.value<TreeValue>()
 
-  // let's try dealing with the string fields separately beacause they are
-  // annoying and there's many of them. Other types like floats vary too much
-  // for abstraction to be useful.
+  // -- process the string fields separately beacause they are
+  // -- annoying and there's many of them. Other types like floats
+  // -- vary too much for abstraction to be useful.
   std::vector<std::tuple<const char *,string *>> string_fields;
   string_fields.push_back({"#TITLE",     &v->smfile.title});
   string_fields.push_back({"#SUBTITLE",  &v->smfile.subtitle});
   string_fields.push_back({"#ARTIST",    &v->smfile.artist});
+  // -- TODO: some way to say "I want to also consider these translit fields".
+  // -- Maybe a right-click menu on Metadata.
   if (v->smfile.has_translit) {
     string_fields.push_back({"#TITLETRANSLIT",     &v->smfile.titletranslit});
     string_fields.push_back({"#SUBTITLETRANSLIT",  &v->smfile.subtitletranslit});
@@ -643,7 +663,6 @@ void KVTreeModel::rebuild_the_entire_model_from_ground_truth() {
   
   // NOTE: Numeric values are not just a pointer to data. I also store the information
   // of what type of field it is so I can decide on more reasonable step amounts for QSpinBoxes.
-  
   {
     key_cell = new Cell("#OFFSET");
     value_cell = new Cell(QString::number(v->smfile.offset));
@@ -697,7 +716,12 @@ void KVTreeModel::rebuild_the_entire_model_from_ground_truth() {
       num_cell->setColumnCount(1);
 
       auto *gt_n = new Cell("Game type");
-      auto *gt_v = new Cell(cstr_from_gametype(diff.game_type));
+      QString gt_str = u"%1 (%2 keys)"_s
+        .arg(gametype_to_cstr(diff.game_type))
+        .arg(gametype_to_keycount(diff.game_type))
+      ;
+      auto *gt_v = new Cell(gt_str);
+      gt_v->setData(PACK(&diff.game_type));
       num_cell->appendRow({gt_n, gt_v});
       auto *ct_n = new Cell("Charter");
       auto *ct_v = new Cell(QString::fromStdString(diff.charter));
@@ -707,9 +731,9 @@ void KVTreeModel::rebuild_the_entire_model_from_ground_truth() {
       // eprintfln("I'm storing this value: %d, as a pointer %p",
       //   (int)diff.diff_type,
       //   &diff.diff_type);
-      auto *dt_v = new Cell(cstr_from_difftype(diff.diff_type)); dt_v->setData(PACK(&diff.diff_type));
+      auto *dt_v = new Cell(difftype_to_cstr(diff.diff_type)); dt_v->setData(PACK(&diff.diff_type));
 
-      QBrush brush(qcolor_from_difftype(diff.diff_type));
+      QBrush brush(difftype_to_qcolor(diff.diff_type));
       // QFont font; font.setBold(true); t_difftype->setFont(1, font);
       dt_v->setForeground(brush);
       num_cell->appendRow({dt_n, dt_v});
@@ -736,7 +760,7 @@ void KVTreeModel::rebuild_the_entire_model_from_ground_truth() {
               u"%1/%2/<span style='color: %4; font-weight: 600;'>%3</span>"_s
               // u"%1/%2/%3"_s
               .arg(me_i).arg(bt_i).arg(smt_i)
-              .arg(cstr_from_smticks(smt_i))
+              .arg(smticks_to_cstr(smt_i))
             );
             SmRelativePos pos = {.measures=(int32_t)me_i, .beats=(int32_t)bt_i, .smticks=(double)smt_i};
             t_noteline_snap->setData(PACK(pos));
@@ -748,7 +772,7 @@ void KVTreeModel::rebuild_the_entire_model_from_ground_truth() {
             t_noteline_notes->setData(PACK(nr));
 
             // -- alternatively, set background color:
-            // QColor snap_color = qcolor_from_smticks(nl.smticks);
+            // QColor snap_color = smticks_to_qcolor(nl.smticks);
             // snap_color.setAlphaF(.12f); // 0 is fully transparent
             // QBrush brush(snap_color);
             // t_noteline_notes->setBackground(brush);
@@ -806,13 +830,19 @@ void NoteDisplayWidget::onDownscrollChange(Qt::CheckState state) {
 }
 
 
+// struct MySplitterBecauseYouCantJustSetAValue : public QSplitter {
+//   MySplitterBecauseYouCantJustSetAValue(Qt::Orientation, QWidget* parent = nullptr) {
+    // ???
+    // this->setRubberBand(0);
+  // }
+// };
 
 
 
 SmFileView::SmFileView(const char *path) {
   // -- parse the file
   std::string smfile_str = read_entire_file(path);
-  auto smfile_opt = smfile_from_string_opt(smfile_str);
+  auto smfile_opt = string_to_smfile_opt(smfile_str);
 
   MATCH (smfile_opt) {
     WHEN (SmFile,
@@ -831,6 +861,11 @@ SmFileView::SmFileView(const char *path) {
   this->setLayout(layout_);
 
   resizable_layout = new QSplitter(Qt::Horizontal);
+
+  resizable_layout->setHandleWidth(6);
+  // resizable_layout->setRubberBand(0);
+  // resizable_layout->setStretchFactor(0, 1);
+  // resizable_layout->setStretchFactor(1, 2);
   layout_->addWidget(resizable_layout);
 
   
@@ -987,7 +1022,7 @@ void KVTreeViewDelegate::paint
       DiffType *dt = _unpacked;
     
       painter->save();
-      QPen pen(qcolor_from_difftype(*dt));
+      QPen pen(difftype_to_qcolor(*dt));
       painter->setPen(pen);
       QStyledItemDelegate::paint(painter, option, index);
       painter->restore();
@@ -1000,6 +1035,15 @@ void KVTreeViewDelegate::paint
     }
   }
 }
+
+struct MyValidator : public QRegularExpressionValidator {
+  explicit MyValidator(const QRegularExpression &re, QObject *parent = nullptr)
+  : QRegularExpressionValidator(re, parent) {}
+  State validate(QString &str, int &pos) const override {
+    str = str.toUpper();
+    return QRegularExpressionValidator::validate(str, pos);
+  }
+};
 
 QWidget* KVTreeViewDelegate::createEditor
 (QWidget* parent, const QStyleOptionViewItem& /*option*/,  const QModelIndex& index) const
@@ -1014,6 +1058,19 @@ QWidget* KVTreeViewDelegate::createEditor
 
   MATCH (data) {
     if (0) {}
+    else WHEN (GameType *,
+      eprintfln("... seems like gametype to me");
+      QComboBox *combo = new QComboBox(parent);
+      for (GameType gt : gametypes) {
+        QString str = u"%1 (%2 keys)"_s
+          .arg(gametype_to_cstr(gt))
+          .arg(gametype_to_keycount(gt))
+        ;
+        combo->addItem(str);
+      }
+      combo->setCurrentIndex((int)*_unpacked);
+      return combo;
+    )
     else WHEN (DiffType *,
       eprintfln("... seems like difftype to me");
       QComboBox *combo = new QComboBox(parent);
@@ -1068,6 +1125,24 @@ QWidget* KVTreeViewDelegate::createEditor
       spinBox->setMaximum(INT32_MAX);
       return spinBox;
     )
+    // -- TODO row editing
+    else WHEN(NoteRow *,
+      (void)_unpacked;
+      eprintfln("seems like a noterow to me");
+      // TODO: does this have to be new-ed?
+      auto *editor = new QLineEdit(parent);
+      editor->setMaxLength(4);
+
+      QString rx_s = u"[01234MLF]{%1}"_s.arg(4);
+      QRegularExpression rx(rx_s);
+      auto *validator = new MyValidator(rx, nullptr);
+      // TODO: it treats 0 as nothing. What if I want to delete to zero
+      // and still keep the zeroes, instead of it pretending that they
+      // don't count?
+      // editor->setInputMask(">NNNN;_");
+      editor->setValidator(validator);
+      return editor;
+    )
     else {
       eprintfln("seems like some unhandled type variant");
       // assert(false && "non-exhaustive variant");
@@ -1078,7 +1153,27 @@ QWidget* KVTreeViewDelegate::createEditor
 }
 
 
-DiffType difftype_from_qstr(const QString str)
+// SIGHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH why are these QStrings?
+// isn't the job of the validator to convert it to the narrower
+// data type so I don't have to do this again????????????
+GameType qstr_to_gametype(const QString &str)
+{
+  using enum GameType;
+  if (str == "dance-single (4 keys)") return DanceSingle;
+  if (str == "dance-double (8 keys)") return DanceDouble;
+  assert(false);
+}
+NoteRow qstr_to_noterow(const QString &str)
+{
+  eprintfln("length is %lld\n", str.size());
+  if (str.size() != 4) assert(false);
+  NoteRow nr;
+  for (auto [i,c] : enumerate(str)) {
+    nr.notes[i] = char_to_notetype((char)c.unicode());
+  }
+  return nr;
+}
+DiffType qstr_to_difftype(const QString &str)
 {
   using enum DiffType;
   if (str == "Beginner")  return Beginner;
@@ -1117,14 +1212,29 @@ KVTreeModel::setData(const QModelIndex &index, const QVariant &value, int role) 
     )
     else WHEN(DiffType *,
       QString edit_result_s = value.value<QString>();
-      DiffType edit_result = difftype_from_qstr(edit_result_s);
-      eprintf("I'm setting the fucking actual diff type to %s\n", cstr_from_difftype(edit_result));
+      DiffType edit_result = qstr_to_difftype(edit_result_s);
+      eprintfln("I'm setting the fucking actual diff type to %s", difftype_to_cstr(edit_result));
       *_unpacked = edit_result;
     )
     else WHEN(uint32_t *,
       int edit_result = value.value<int>();
       assert(edit_result >= 0);
       *_unpacked = (uint32_t)edit_result;
+    )
+    else WHEN(GameType *,
+      // -- XXX: this is stupid, why should I have to distinguish
+      // -- between dance-single and dance-single (4 keys)? Isn't there
+      // -- some better way to set the data?
+      QString edit_result_s = value.value<QString>();
+
+      // -- also, at this point you want to blow everything away
+      // -- and start assuming different column count which is another
+      // -- wasp nest
+      *_unpacked = qstr_to_gametype(edit_result_s);
+    )
+    else WHEN(NoteRow *,
+      QString edit_result_s = value.value<QString>();
+      *_unpacked = qstr_to_noterow(edit_result_s);
     )
     else {
       eprintfln("Warning: unhandled edit type, the new value will not be set");
@@ -1139,7 +1249,6 @@ KVTreeModel::setData(const QModelIndex &index, const QVariant &value, int role) 
 }
 
 
-
 struct MainWindow : public QMainWindow {
   QTabWidget w_tabs_root;
 
@@ -1149,10 +1258,19 @@ struct MainWindow : public QMainWindow {
     w_tabs_root.setMovable(true);
     w_tabs_root.setStyleSheet("QTabBar::tab {max-width: 100px;}");
     w_tabs_root.setElideMode(Qt::ElideRight);
+
+    QWidget::connect(
+      &w_tabs_root,
+      &QTabWidget::tabCloseRequested,
+      this,
+      [&](int index){
+        // -- TODO: prompt to save
+        this->w_tabs_root.removeTab(index);
+      }
+    );
     
-    // -- By the time the file opener lambda finds time to visit his load_file friend,
-    // -- she finds him gone, surrounded by nothing but segfaults and memory corruption.
-    // -- Hence static (or use a normal function).
+    // -- if you take a reference to a non-static temporary,
+    // -- you'll completely corrupt your stack beyond recognition. 10/10
     static auto load_file = [&](const char *path) {
       SmFileView *file = new SmFileView(path);
       assert(file != nullptr);
