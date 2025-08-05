@@ -6,6 +6,7 @@ using std::string;
 
 #include "sm_parser.h"
 #include "qt_includes.h"
+#include "claude/exp_spinbox.h"
 void __please(){qt_includes_suppress_bogus_unused_warning=0;};
 using namespace Qt::Literals::StringLiterals;
 
@@ -304,7 +305,7 @@ struct SmFileView : public QWidget {
           QHBoxLayout *preview_controls;
             QCheckBox *downscroll_chk;
             QLabel *cmod_spinbox_label;
-            QSpinBox *cmod_spinbox;
+            ExponentialSpinBox *cmod_spinbox;
 
   // constructor
   SmFileView(const char *path);
@@ -958,14 +959,15 @@ SmFileView::SmFileView(const char *path) {
       preview_controls->addWidget(cmod_spinbox_label, 1);
       preview_controls->setAlignment(cmod_spinbox_label, Qt::AlignCenter);      
 
-      cmod_spinbox = new QSpinBox();
+      cmod_spinbox = new ExponentialSpinBox();
+        cmod_spinbox->setDecimals(0);
         cmod_spinbox->setMinimum(50);
         cmod_spinbox->setMaximum(1000);
         cmod_spinbox->setValue(700);
-        cmod_spinbox->setSingleStep(15);
+        cmod_spinbox->setExponentialFactor(1.05);
         QObject::connect(
           cmod_spinbox,
-          &QSpinBox::valueChanged,
+          &ExponentialSpinBox::valueChanged,
           preview_actual,
           &NoteDisplayWidget::onCmodChange
         );
