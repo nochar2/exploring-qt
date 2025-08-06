@@ -22,6 +22,7 @@ QT = widgets                  # (kind of implies `core gui` somehow)
 
 TARGET = zerokara
 SOURCES = zerokara.cpp sm_parser.cpp
+QMAKE_LFLAGS += -fuse-ld=mold
 
 
 ###### dumb shit

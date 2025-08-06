@@ -1,41 +1,110 @@
 // @includes -----------------------------------------------------------------------------------------------------------------
 
-#include "qcolor.h"
-#include <string>
+// -- hot reloading
+#include <sys/inotify.h>          // for inotify_add_watch, inotify_init1
+
+// -- Qt includes
+#include "qabstractitemmodel.h"   // for QModelIndex
+#include "qaction.h"              // for QAction
+#include "qapplication.h"         // for QApplication
+#include "qboxlayout.h"           // for QHBoxLayout, QVBoxLayout
+#include "qbrush.h"               // for QBrush
+#include "qbytearray.h"           // for QByteArray
+#include "qchar.h"                // for QChar
+#include "qcheckbox.h"            // for QCheckBox
+#include "qcolor.h"               // for QColor, darkorange, Blue, DarkMagenta
+#include "qcombobox.h"            // for QComboBox
+#include "qdatastream.h"          // for operator<<, operator>>
+#include "qdebug.h"               // for operator<<
+#include "qevent.h"               // for QKeyEvent, QWheelEvent
+#include "qfiledialog.h"          // for QFileDialog
+#include "qflags.h"               // for QFlags
+#include "qframe.h"               // for QFrame
+#include "qguiapplication.h"      // for QGuiApplication
+#include "qlabel.h"               // for QLabel
+#include "qline.h"                // for QLineF, QLine
+#include "qlineedit.h"            // for QLineEdit
+#include "qlist.h"                // for QList
+#include "qmainwindow.h"          // for QMainWindow
+#include "qmenu.h"                // for QMenu
+#include "qmenubar.h"             // for QMenuBar
+#include "qmetatype.h"            // for checkTypeIsSuitableForMetaType, typ...
+#include "qnamespace.h"           // for AlignmentFlag, CheckState, qt_getEn...
+#include "qobject.h"              // for qobject_cast, QObject
+#include "qpainter.h"             // for QPainter
+#include "qpalette.h"             // for QPalette
+#include "qpen.h"                 // for QPen
+#include "qpoint.h"               // for QPoint
+#include "qpushbutton.h"          // for QPushButton
+#include "qrect.h"                // for QRectF, QRect
+#include "qregularexpression.h"   // for QRegularExpression
+#include "qspinbox.h"             // for QDoubleSpinBox, QSpinBox
+#include "qsplitter.h"            // for QSplitter
+#include "qstandarditemmodel.h"   // for QStandardItem, QStandardItemModel
+#include "qstring.h"              // for QString, operator""_s, operator==
+#include "qstyle.h"               // for QStyle
+#include "qstyleditemdelegate.h"  // for QStyledItemDelegate
+#include "qstyleoption.h"         // for QStyleOptionViewItem
+#include "qtabwidget.h"           // for QTabWidget
+#include "qtextdocument.h"        // for QTextDocument
+#include "qtreeview.h"            // for QTreeView
+#include "qvalidator.h"           // for QRegularExpressionValidator
+#include "qvariant.h"             // for QVariant
+#include "qwidget.h"              // for QWidget
+#include "qtypeinfo.h"            // ????????
+
+// -- stdlib mostly
+#include <QtCore/qobjectdefs.h>   // for FunctionPointer<>::ArgumentCount
+#include <assert.h>               // for assert
+#include <pthread.h>              // for pthread_create, pthread_t
+#include <stdint.h>               // for int32_t, uint32_t, INT32_MAX
+#include <stdio.h>                // for fprintf, stderr, size_t, NULL
+#include <sys/types.h>            // for ssize_t
+#include <unistd.h>               // for execl, read
+#include <algorithm>              // for max, min
+#include <array>                  // for array
+#include <cmath>                  // for fmod, ceil, fabs, round
+#include <format>                 // for vector
+#include <functional>             // for function
+#include <initializer_list>       // for initializer_list
+#include <iterator>               // for pair
+#include <string>                 // for basic_string, string
+#include <tuple>                  // for tuple, get
+#include <utility>                // for pair, get
+#include <variant>                // for get, holds_alternative, variant, tuple
+#include <vector>                 // for vector
+struct DoubleField;
+struct SmRelativePos;
+
+#include "claude/exp_spinbox.h"   // for ExponentialSpinBox
+#include "dumb_stdlib_linux.h"    // for Array, read_entire_file, Vector
+#include "sm_parser.h"            // for Difficulty, TimeKV, SmFile, NoteRow
+
+#include <libgen.h>               // for basename
+#include <ranges>
+
+
+// @using --------------------------------------------------------------------------
 using std::string;
-
-#include "sm_parser.h"
-#include "qt_includes.h"
-#include "claude/exp_spinbox.h"
-void __please(){qt_includes_suppress_bogus_unused_warning=0;};
 using namespace Qt::Literals::StringLiterals;
+using std::ranges::views::enumerate;
 
-#include <libgen.h>
-
-// reload hacks
-#include <sys/inotify.h>
-#include <unistd.h>
-
-// abstract away some parts of C++ STL, for testing compilation times
-#include "dumb_stdlib_linux.h"
-
+// @macros ----------------------------------------------------------------------------------
 #pragma GCC poison printf
 #define eprintf(...)   fprintf(stderr, __VA_ARGS__)
 #define eprintfln(x, ...) eprintf(x "\n" __VA_OPT__(,) __VA_ARGS__)
 
-#include <ranges>
-using std::ranges::views::enumerate;
 
 // make C++ variants less disgusting
 #define WHEN(T,bod) if (std::holds_alternative<T>(*_vrnt)) { T _unpacked = std::get<T>(*_vrnt); bod }
 #define MATCH(val) typeof(val) *_vrnt = &val;
 
+// @forward-declarations -----------------------------------------------------------------------
+struct StatusBar;
+struct SmFileView;
 
 
 // @structures ----------------------------------------------------------------------------------------------------
-struct NoteDisplayWidget;
-struct StatusBar;
-struct SmFileView;
 
 struct NoteDisplayWidget : public QWidget {
   SmFileView *sm_file_view;
