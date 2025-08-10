@@ -10,7 +10,7 @@
 #include <vector>
 #define Vector std::vector
 
-// #define USE_STL
+#define USE_STL // at least for now
 #ifdef USE_STL
 #include <array>
 #include <chrono>
