@@ -435,7 +435,7 @@ string_to_smfile_opt(string const& str)
             default:
               return (SmParseError) {.msg=std::format(
                  "While reading #Notes/NoteRows: Measure #{}, pattern #{}: Garbage starting with {}",
-                 measure_i, pat_i, sv.substr(0, std::min(10UL,sv.size()))
+                 measure_i, pat_i, sv.substr(0, std::min((size_t)10,sv.size()))
                 )
               }; 
             }
