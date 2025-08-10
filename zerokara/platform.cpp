@@ -24,6 +24,7 @@ void run_auto_restarter(int argc, char **argv) {
 }
 
 #else
+#include <stdio.h>
 void run_auto_restarter(int argc, char **argv) {
   fprintf(stderr, "E: auto restart is not available on Windows yet.\n");
 }
