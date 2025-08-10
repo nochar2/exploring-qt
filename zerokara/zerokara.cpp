@@ -1,8 +1,5 @@
 // @includes -----------------------------------------------------------------------------------------------------------------
 
-// -- hot reloading
-#include <sys/inotify.h>          // for inotify_add_watch, inotify_init1
-
 // -- Qt includes
 #include "qabstractitemmodel.h"   // for QModelIndex
 #include "qaction.h"              // for QAction
@@ -56,11 +53,9 @@
 // -- stdlib mostly
 #include <QtCore/qobjectdefs.h>   // for FunctionPointer<>::ArgumentCount
 #include <assert.h>               // for assert
-#include <pthread.h>              // for pthread_create, pthread_t
 #include <stdint.h>               // for int32_t, uint32_t, INT32_MAX
 #include <stdio.h>                // for fprintf, stderr, size_t, NULL
 #include <sys/types.h>            // for ssize_t
-#include <unistd.h>               // for execl, read
 #include <algorithm>              // for max, min
 #include <array>                  // for array
 #include <cmath>                  // for fmod, ceil, fabs, round
@@ -1359,27 +1354,14 @@ struct MainWindow : public QMainWindow {
 // ----------------------------------------------- M A I N ------------------------------------------
 // --------------------------------------------------------------------------------------------------
 // --------------------------------------------------------------------------------------------------
-__attribute__((noreturn))
-void *exec_yourself(void *arg) {
-  int inotify_fd = *(int *)arg;
-  char dontcare[1];
-  eprintfln("\nI: The app will be restarted when the ./zerokara binary changes.");
-  while(1) { // -- spam while the binary is momentarily gone
-    ssize_t read_bytes = read(inotify_fd, dontcare, 1);             (void)(read_bytes);
-    int minusone_on_fail = execl("./zerokara", "./zerokara", NULL); (void)(minusone_on_fail);
-  }
-}
+
 int main(int argc, char **argv) {
   // -- make float parsing not break in Czech locale
   // -- XXX: why does this not work? For now, I'll set it nearby float parsing.
   // QLocale locale("C");
   // QLocale::setDefault(locale);
 
-  // -- let's try the hot restart thing.
-  int inotify_fd = inotify_init1(IN_CLOEXEC);
-  inotify_add_watch(inotify_fd, argv[0], IN_ATTRIB);
-  pthread_t inotify_reader;
-  pthread_create(&inotify_reader, NULL, exec_yourself, &inotify_fd);
+void run_auto_restarter(int argc, char **argv);
 
   // -- QGuiApplication doesn't work if you want widgets
   QApplication app(argc, argv);

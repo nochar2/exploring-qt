@@ -21,7 +21,7 @@ CONFIG = qt import_qpa_plugin \
 QT = widgets                  # (kind of implies `core gui` somehow)
 
 TARGET = zerokara
-SOURCES = zerokara.cpp sm_parser.cpp
+SOURCES = zerokara.cpp sm_parser.cpp platform.cpp
 QMAKE_LFLAGS += -fuse-ld=mold
 
 
