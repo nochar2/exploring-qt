@@ -11,16 +11,26 @@
 #define Vector std::vector
 
 #define USE_STL // at least for now
+
 #ifdef USE_STL
 #include <array>
 #include <chrono>
 #define Array  std::array
 #define Chrono std::chrono
-#else
+#include <fstream>
+#include <filesystem>
+namespace fs = std::filesystem;
+inline std::string read_entire_file(const char *path) {
+  std::ifstream f(path, std::ios::in | std::ios::binary);
+  const auto sz = fs::file_size(path);
+  std::string content(sz, '\0');
+  f.read(content.data(), sz);
+  return content;
+}
+
+#else // don't use some components of the STL?
 
 #include <string>
-
-// avoids <fstream>
 #include <err.h>
 inline std::string read_entire_file(const char *path) {
   FILE *f = fopen(path, "r");
