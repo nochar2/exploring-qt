@@ -9,12 +9,17 @@
 ### The default value of CONFIG is this monstrosity:
 ### lex yacc debug exceptions depend_includepath testcase_targets import_plugins import_qpa_plugin file_copies qmake_use qt warn_on release link_prl incremental release shared plugin_manifest intelcet glibc_fortify_source trivial_auto_var_init_pattern stack_protector stack_clash_protection libstdcpp_assertions relro_now_linker linux unix posix gcc
 
-# C++23 required for enumerations
-CONFIG = qt import_qpa_plugin \
-	c++2b warn_on rtti_off exceptions_off \
-	debug force_debug_info 
-	# precompile_header
-# PRECOMPILED_HEADER = precompiled.h
+linux {
+	CONFIG = qt import_qpa_plugin \
+		c++2b warn_on rtti_off exceptions_off \
+		debug force_debug_info 
+	QMAKE_LFLAGS += -fuse-ld=mold
+}
+# idk how to make it run windeployqt in the debug dir yet
+win32 {
+	CONFIG += c++2b debug force_debug_info
+}
+
 
 # QMAKE_CXXFLAGS_DEBUG += -Wconversion
 
@@ -22,9 +27,10 @@ QT = widgets                  # (kind of implies `core gui` somehow)
 
 TARGET = zerokara
 SOURCES = zerokara.cpp sm_parser.cpp platform.cpp
-QMAKE_LFLAGS += -fuse-ld=mold
 
 
 ###### dumb shit
 ### -fno-exceptions just disables try ... catch, not actual exceptions
 ### CONFIG -= exceptions
+# precompile_header
+# PRECOMPILED_HEADER = precompiled.h
