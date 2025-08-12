@@ -2,7 +2,6 @@
 # {mkShell,qt6,libglvnd}:
 pkgs.mkShell {
 # pkgs.stdenv.mkDerivation {
-  name = "dontcare";
   buildInputs = [
     # kdePackages.qtbase
     # kdePackages.qtdeclarative
