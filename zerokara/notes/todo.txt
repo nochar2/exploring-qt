@@ -1,0 +1,25 @@
+option to say "jump to next / previous note" instead of fixating on snap
+redrawing everything in a model has its issues, store at least expanded/collapsed state?
+	and scroll pos? like it's not a good idea anyway but unsynced state is worse
+a way to have Difficulty tabs
+	if there are no diffs selected or created yet, what should the view look like?
+
+
+the note edit widget should have green outline when it's selected so one knows when
+	they can put notes to it; although, maybe you want the keys to work globally
+	unless an edit field is selected...
+
+float locale-specific comma in QDoubleSpinBoxes
+
+scroll position always scrolls to the beginning
+
+changing gametype should reflow the game so that i can use more columns (SoA?)
+
+draw / handle different note types
+- I should be able to switch to whichever type I currently have
+- I should be able to place the type (holds should extend to infinity maybe with some warning)
+- holds look like a freaking nightmare
+- draw mines somehow at least
+
+
+precompiled.h probably shouldn't exist ???
