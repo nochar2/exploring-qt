@@ -2,11 +2,12 @@
 # {mkShell,qt6,libglvnd}:
 pkgs.mkShell {
 # pkgs.stdenv.mkDerivation {
-  buildInputs = [
-    # kdePackages.qtbase
-    # kdePackages.qtdeclarative
+  buildInputs = with pkgs; [
+    cmake
+    kdePackages.qtbase
+    kdePackages.qtdeclarative
     # kdePackages.qtquick3d
-    pkgs.qt6.full
-    pkgs.libglvnd
+    # qt6.full
+    # libglvnd
   ];
 }
