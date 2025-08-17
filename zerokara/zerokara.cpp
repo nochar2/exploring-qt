@@ -1,5 +1,8 @@
+// #define SPLITTER
+
 // @includes -----------------------------------------------------------------------------------------------------------------
 
+// generated from include-what-you-use
 // -- Qt includes
 #include "qabstractitemmodel.h"   // for QModelIndex
 #include "qaction.h"              // for QAction
@@ -36,7 +39,9 @@
 #include "qrect.h"                // for QRectF, QRect
 #include "qregularexpression.h"   // for QRegularExpression
 #include "qspinbox.h"             // for QDoubleSpinBox, QSpinBox
+#ifdef SPLITTER
 #include "qsplitter.h"            // for QSplitter
+#endif
 #include "qstandarditemmodel.h"   // for QStandardItem, QStandardItemModel
 #include "qstring.h"              // for QString, operator""_s, operator==
 #include "qstyle.h"               // for QStyle
@@ -48,7 +53,6 @@
 #include "qvalidator.h"           // for QRegularExpressionValidator
 #include "qvariant.h"             // for QVariant
 #include "qwidget.h"              // for QWidget
-#include "qtypeinfo.h"            // ????????
 
 // -- stdlib mostly
 #include <QtCore/qobjectdefs.h>   // for FunctionPointer<>::ArgumentCount
@@ -59,10 +63,8 @@
 #include <algorithm>              // for max, min
 #include <array>                  // for array
 #include <cmath>                  // for fmod, ceil, fabs, round
-#include <format>                 // for vector
 #include <functional>             // for function
 #include <initializer_list>       // for initializer_list
-#include <iterator>               // for pair
 #include <string>                 // for basic_string, string
 #include <tuple>                  // for tuple, get
 #include <utility>                // for pair, get
@@ -125,7 +127,6 @@ struct NoteDisplayWidget : public QWidget {
   void onCmodChange(int value);
   void onDownscrollChange(Qt::CheckState state);
 };
-
 
 
 struct StatusBar : public QWidget {
@@ -197,59 +198,64 @@ struct SmRelativePos {
 
 QColor difftype_to_qcolor(DiffType dt)
 {
+  using enum DiffType;
+  using namespace QColorConstants;
   switch (dt) {
-    case DiffType::Beginner:  return QColorConstants::DarkCyan;
-    case DiffType::Easy:      return QColorConstants::DarkGreen;
-    case DiffType::Medium:    return QColorConstants::Svg::darkorange;
-    case DiffType::Hard:      return QColorConstants::DarkRed;
-    case DiffType::Challenge: return QColorConstants::Svg::purple;
-    case DiffType::Edit:      return QColorConstants::DarkGray;
+    case Beginner:  return DarkCyan;
+    case Easy:      return DarkGreen;
+    case Medium:    return Svg::darkorange;
+    case Hard:      return DarkRed;
+    case Challenge: return Svg::purple;
+    case Edit:      return DarkGray;
   }
   assert(false);
 }
 
-const char *snap_to_cstr_color (int snap);
 
-// -- I might want to unify these two maybe ???
+// convert "4th", "8th", "16th" ... to smticks
+double smticks_in_1_(int subdiv){return 192./subdiv;};
+
 QColor smticks_to_qcolor(double smticks) {
+  using namespace QColorConstants;
   assert(smticks <= 48.0);
   if (smticks == 48.0) smticks = 0.0; // can happen due to rounding up
 
   std::vector<std::pair<uint32_t,QColor>> snap_to_color = {
-    { (192/4),  QColorConstants::Red },
-    { (192/8),  QColorConstants::Blue },
-    { (192/12), QColorConstants::Svg::lawngreen },   // less eyesore than green
-    { (192/16), QColorConstants::Svg::gold },        // less eyesore than yellow
-    { (192/24), QColorConstants::DarkMagenta },
-    { (192/32), QColorConstants::Svg::darkorange },  // orange and gold are too similar
-    { (192/48), QColorConstants::Svg::deepskyblue }, // less eyesore than cyan
+    { smticks_in_1_(4),  Red },
+    { smticks_in_1_(8),  Blue },
+    { smticks_in_1_(12), Svg::lawngreen },   // less eyesore than green
+    { smticks_in_1_(16), Svg::gold },        // less eyesore than yellow
+    { smticks_in_1_(24), DarkMagenta },
+    { smticks_in_1_(32), Svg::darkorange },  // orange and gold are too similar
+    { smticks_in_1_(48), Svg::deepskyblue }, // less eyesore than cyan
   };
   for (auto [s,c] : snap_to_color) {
     if (std::fmod(smticks, s) == 0) return c;
   }
-  return QColorConstants::Gray;
+  return Gray;
 }
+
 const char *smticks_to_cstr_color(double smticks) {
-  if (std::fmod(smticks, 48/1) == 0) return "red";
-  if (std::fmod(smticks, 48/2) == 0) return "blue";
-  if (std::fmod(smticks, 48/3) == 0) return "green";
-  if (std::fmod(smticks, 48/4) == 0) return "goldenrod";
-  if (std::fmod(smticks, 48/6) == 0) return "magenta";
-  if (std::fmod(smticks, 48/8) == 0) return "orange";
-  if (std::fmod(smticks, 48/12) == 0) return "deepskyblue";
+  if (std::fmod(smticks, smticks_in_1_(4)) == 0) return "red";
+  if (std::fmod(smticks, smticks_in_1_(8)) == 0) return "blue";
+  if (std::fmod(smticks, smticks_in_1_(12)) == 0) return "green";
+  if (std::fmod(smticks, smticks_in_1_(16)) == 0) return "goldenrod";
+  if (std::fmod(smticks, smticks_in_1_(24)) == 0) return "magenta";
+  if (std::fmod(smticks, smticks_in_1_(32)) == 0) return "orange";
+  if (std::fmod(smticks, smticks_in_1_(48)) == 0) return "deepskyblue";
   return "grey";
 }
 
-bool smtick_is_sane(double smtick, int cur_snap_nths) {
+bool smticks_are_sane(double smticks, int cur_snap_nths) {
   // -- false on gray notes
   // for (auto div : {1,2,3,4,6,8,12}) {
   //   if (std::fmod(smtick, 48/div) == 0.) return true;
   // }
   // return false;
 
-  // -- false if you can no longer step over red notes
-  // -- (includes stuff like offbeat triplets)
-  return std::fmod(smtick, 192/cur_snap_nths) == 0;
+  // -- false if you can no longer land on red notes
+  // -- (stuff like offbeat triplets)
+  return std::fmod(smticks, 192/cur_snap_nths) == 0;
 }
 
 // this is for the Snap xx highlight
@@ -283,8 +289,6 @@ int sm_sane_snap_lower_than(int snap) {
 
 
 
-// who cares, everyone uses 4/4
-double smticks_in_1_(int subdiv){return 192./subdiv;};
 
 
 
@@ -358,8 +362,12 @@ struct SmFileView : public QWidget {
 
   // widgets (roughly how they're nested)
   // (maybe some of this can just leak and not be here)
-  QHBoxLayout *layout_;
+#ifdef SPLITTER
+  QHBoxLayout *root_layout_just_to_fill_entire_space;
     QSplitter *resizable_layout;
+#else
+  QHBoxLayout *root_hlayout;
+#endif
       QTreeView *tree_view;
       QWidget *right_chunk;
         QVBoxLayout *preview_tile;
@@ -419,14 +427,16 @@ void StatusBar::redraw() {
   // font.setPointSize(8);
   // this->btn_reset_weird_snap.setFont(font);
 
+  // TODO: There should be a snap policy, which is either of:
+  // - exact (some number of smticks)
+  // - nearest note
   this->label_snap.setText(
     QString("| Snap <span style='color: %1; font-weight: 600;'>%2</span>")
     .arg(snap_to_cstr_color(v->cur_snap_nths))
     .arg(v->cur_snap_nths)
   );
 
-  // -- for now comment out
-  if (!smtick_is_sane(v->cur_chart_pos.smticks, v->cur_snap_nths)) {
+  if (!smticks_are_sane(v->cur_chart_pos.smticks, v->cur_snap_nths)) {
     this->btn_reset_weird_snap.show();
   } else {
     this->btn_reset_weird_snap.hide();
@@ -783,6 +793,7 @@ void KVTreeModel::rebuild_the_entire_model_from_ground_truth() {
       num_cell->appendRow({gt_n, gt_v});
       auto *ct_n = new Cell("Charter");
       auto *ct_v = new Cell(QString::fromStdString(diff.charter));
+      ct_v->setData(PACK(&diff.charter));
       num_cell->appendRow({ct_n, ct_v});
 
       auto *dt_n = new Cell("Diff type");
@@ -872,7 +883,7 @@ void KVTreeModel::rebuild_the_entire_model_from_ground_truth() {
   // v->tree_view->resizeColumnToContents(0);
   v->tree_view->setColumnWidth(0, 200);
   v->tree_view->setColumnWidth(1, 200);
-
+  v->tree_view->setExpandsOnDoubleClick(true);
 };
 
 
@@ -914,19 +925,18 @@ SmFileView::SmFileView(const char *path) {
   }
 
 
-  // ----------------------- build UI ------------------------------------------------
-  layout_ = new QHBoxLayout(); // -- required so that it fills the entire space
-  this->setLayout(layout_);
-
+  // ----------------------- @build_ui ------------------------------------------------
+#ifdef SPLITTER
+  root_layout_just_to_fill_entire_space = new QHBoxLayout();
+  this->setLayout(root_layout_just_to_fill_entire_space);
   resizable_layout = new QSplitter(Qt::Horizontal);
-
   resizable_layout->setHandleWidth(6);
-  // resizable_layout->setRubberBand(0);
-  // resizable_layout->setStretchFactor(0, 1);
-  // resizable_layout->setStretchFactor(1, 2);
-  layout_->addWidget(resizable_layout);
+  root_layout_just_to_fill_entire_space->addWidget(resizable_layout);
+#else
+  root_hlayout = new QHBoxLayout(this);
+#endif
 
-  
+
   // -- tree model of the whole file for a tree widget
   // (&smfile_model); // XXX: I don't know what was here before
   tree_model = new KVTreeModel(this);
@@ -939,7 +949,13 @@ SmFileView::SmFileView(const char *path) {
   tree_view->setItemDelegate(tree_view_delegate);
 
   tree_model->rebuild_the_entire_model_from_ground_truth();
+
+#ifdef SPLITTER
   resizable_layout->addWidget(tree_view);
+#else
+  root_hlayout->addWidget(tree_view);
+  root_hlayout->setStretchFactor(tree_view, 1);
+#endif
 
 
   right_chunk = new QWidget();
@@ -1041,7 +1057,14 @@ SmFileView::SmFileView(const char *path) {
       preview_controls->setAlignment(cmod_spinbox, Qt::AlignCenter);
     preview_tile->addLayout(preview_controls, 0);
 
+
+#ifdef SPLITTER
   resizable_layout->addWidget(right_chunk);
+#else
+  root_hlayout->addWidget(right_chunk);
+  root_hlayout->setStretchFactor(right_chunk, 2);
+#endif
+
 }
 
 
@@ -1224,7 +1247,7 @@ QWidget* KVTreeViewDelegate::createEditor
 
 NoteRow qstr_to_noterow(const QString &str)
 {
-  eprintfln("length is %lld\n", str.size());
+  eprintfln("length is %lld", str.size());
   if (str.size() != 4) assert(false);
   NoteRow nr;
   for (auto [i,c] : enumerate(str)) {
