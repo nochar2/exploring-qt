@@ -3,6 +3,9 @@
 # todo add more directories
 !zerokara/
 !tree_view_with_menu/
+!qml/
+!qml/qt.io
+!*.qml
 
 !*.cpp
 # I have seen moc_predefs.h somewhere that we might want to ignore, idk
