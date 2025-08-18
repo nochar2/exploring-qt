@@ -6,7 +6,7 @@ pkgs.mkShell {
     cmake
     kdePackages.qtbase
     kdePackages.qtdeclarative
-    # kdePackages.qtquick3d
+    kdePackages.qtquick3d
     # qt6.full
     # libglvnd
   ];

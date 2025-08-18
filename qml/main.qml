@@ -46,24 +46,32 @@ ApplicationWindow {
       TabButton { text: "File 1" }
       TabButton { text: "File 2" }
     }
+
     RowLayout {
       id: main
-      Layout.bottomMargin: 10
-      Layout.leftMargin: 10
-      Layout.rightMargin: 10
+      Layout.bottomMargin: 10; Layout.leftMargin: 10; Layout.rightMargin: 10
 
       ColumnLayout {
-        Layout.preferredWidth: 25
-        Layout.alignment: Qt.AlignTop
         id: sidebar_toggles
+        Layout.preferredWidth: 25
+        Layout.maximumWidth: 25
+        Layout.alignment: Qt.AlignTop
         Button {
-          text: "Tree"
+          contentItem: Text {
+            text: "Tree"
+            wrapMode: Text.WrapAnywhere
+          }
           Layout.fillWidth: true
+          Layout.preferredHeight: 100
           onClicked: function() { sidebar.visible = !sidebar.visible; }
         }
         Button {
+          contentItem: Text {
+            text: "Snaps"
+            wrapMode: Text.WrapAnywhere
+          }
           Layout.fillWidth: true
-          text: "Snaps"
+          Layout.preferredHeight: 100
         }
       }
 
@@ -80,7 +88,7 @@ ApplicationWindow {
             ListElement {foo: "Item 7"} ListElement {foo: "Item 8"}
           }
           // delegate: Rectangle {
-          delegate: Text {
+          delegate: Label {
             required property string foo
             text: foo
             // Layout.fillWidth: true
@@ -102,13 +110,6 @@ ApplicationWindow {
           TabButton { text: "Diff 1" }
           TabButton { text: "Diff 2" }
           TabButton { text: "+" }
-          // Rectangle {
-          //   anchors.fill: parent
-          //   z: 200
-          //   color: "green"
-          //   border.color: "black"
-          //   border.width: 2
-          // }
         }
 
         Rectangle {
@@ -136,6 +137,17 @@ ApplicationWindow {
           stepSize: 25.
           wheelEnabled: true
         }
+        Rectangle {
+          Layout.fillWidth: true
+          // Layout.fillHeight: true
+          color: "lightblue"
+          Layout.preferredHeight: 200
+          Label {
+            anchors.centerIn: parent
+            text: "scrollable note table will be shown here"
+          }
+        }
+
       }
     }
   }
