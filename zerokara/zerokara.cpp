@@ -38,6 +38,7 @@
 #include "qpushbutton.h"          // for QPushButton
 #include "qrect.h"                // for QRectF, QRect
 #include "qregularexpression.h"   // for QRegularExpression
+#include <QSpacerItem>          // for QSpacerItem
 #include "qspinbox.h"             // for QDoubleSpinBox, QSpinBox
 #ifdef SPLITTER
 #include "qsplitter.h"            // for QSplitter
@@ -88,8 +89,21 @@ using std::ranges::views::enumerate;
 
 // @macros ----------------------------------------------------------------------------------
 #pragma GCC poison printf
-#define eprintf(...)   fprintf(stderr, __VA_ARGS__)
+#define eprintf(...)      fprintf(stderr, __VA_ARGS__)
 #define eprintfln(x, ...) eprintf(x "\n" __VA_OPT__(,) __VA_ARGS__)
+
+#define ANSI_BLUE    "\033[34m"
+#define ANSI_GREY    "\033[90m"
+#define ANSI_YELLOW  "\033[33m"
+#define ANSI_RED     "\033[31m"
+#define ANSI_RESET   "\033[0m"
+
+#define log_debug(x, ...) eprintfln("[" ANSI_BLUE   "D" ANSI_RESET "] " x, __VA_ARGS__)
+#define log_info(x, ...)  eprintfln("[" ANSI_GREY   "I" ANSI_RESET "] " x, __VA_ARGS__)
+#define log_warn(x, ...)  eprintfln("[" ANSI_YELLOW "W" ANSI_RESET "] " x, __VA_ARGS__)
+#define log_err(x, ...)   eprintfln("[" ANSI_RED    "E" ANSI_RESET "] " x, __VA_ARGS__)
+#define log_error(...)    log_err(__VA_ARGS__)
+
 
 // make C++ variants less disgusting
 #define WHEN(T,bod) if (std::holds_alternative<T>(*_vrnt)) { T _unpacked = std::get<T>(*_vrnt); bod }
@@ -108,7 +122,6 @@ struct TextStatusBar : public QWidget {
   State *state;
   NoteDisplayWidget *note_display_widget;
 
-  QHBoxLayout container;
   QLabel label_pos;
   QPushButton btn_to_reset_weird_snap;
   QLabel label_snap;
@@ -214,7 +227,7 @@ QColor difftype_to_qcolor(DiffType dt)
     case Challenge: return Svg::purple;
     case Edit:      return DarkGray;
   }
-  assert(false);
+  log_err("FATAL: A DiffType is not a valid value, but this vomit: %d", dt); assert(false);
 }
 
 
@@ -373,8 +386,21 @@ struct SmFileState {
 // ground truth data
 struct State {
   std::vector<SmFileState> loaded_files;
-  size_t cur_tab;
-  SmFileState *cur_file_state() {return &loaded_files[cur_tab];}
+  size_t cur_tab = (size_t)-1;
+
+  // All I want to do:
+  // - construct an optional ref, by an injection into the coproduct SmFileState + {nullopt}
+  // - destruct by a match (switch) statement.
+  // Why is this SO painful to do in C++? It doesn't even have optional references until C++26???
+  // A pointer it is.
+  SmFileState *cur_file_state() {
+    if (loaded_files.size() > 0) {
+      assert(cur_tab < loaded_files.size());
+      return &loaded_files[cur_tab];
+    } else {
+      return nullptr;
+    }
+  }
 };
 
 
@@ -388,11 +414,10 @@ TextStatusBar::TextStatusBar(QWidget *parent, State *state, NoteDisplayWidget *n
 {
   auto s = this->state;
 
-  this->container.addWidget(&this->label_pos, 0);
-  this->container.addWidget(&this->btn_to_reset_weird_snap, 0);
-  this->container.addWidget(&this->label_snap, 0);
-  // container.setParent(this);
-  this->setLayout(&this->container);
+  auto hbox = new QHBoxLayout(); this->setLayout(hbox);
+  hbox->addWidget(&this->label_pos, 0);
+  hbox->addWidget(&this->btn_to_reset_weird_snap, 0);
+  hbox->addWidget(&this->label_snap, 0);
   this->setParent(parent);
 
   QObject::connect(
@@ -406,7 +431,11 @@ TextStatusBar::TextStatusBar(QWidget *parent, State *state, NoteDisplayWidget *n
       this->note_display_widget->update();
     }
   );
-  this->redraw();
+  // -- We CANNOT redraw here. We don't have any files loaded yet, and this crashes because
+  // -- it references a position of a currently loaded file. So, this whole widget
+  // -- (or maybe most of the UI) can't exist if we don't have any files, or it has to
+  // -- use '--' or something. Think about what to do here.
+  // this->redraw();
 };
 
 void TextStatusBar::redraw() {
@@ -450,7 +479,7 @@ void NoteDisplayWidget::keyPressEvent(QKeyEvent *event) {
   auto f   = this->state->cur_file_state()->smfile;
   auto pos = this->state->cur_file_state()->cur_chart_pos;
 
-  eprintfln("Key press %d", event->key());
+  log_debug("Key press %d", event->key());
 
   // -- XXX: There should be a pointer to currently active Difficulty, not 0.
   // -- That's not implemented yet.
@@ -694,9 +723,19 @@ void KVTreeModel::rebuild_the_entire_model_from_ground_truth() {
   // -- I construct a Cell (QStandardItem) the following way:
   // -- * the value in constructor is merely a visual string
   // -- * the data is a pointer to actual ground truth (or wrapper with extra info)
-  auto f = this->state->cur_file_state()->smfile;
 
   this->clear();
+
+  auto fs = this->state->cur_file_state();
+  // There might be a situation where no files are loaded; in that case,
+  // probably don't show anything.
+  if (fs == nullptr) {
+    log_info("I'm not rebuilding the model because there is no file loaded yet.");
+    return; 
+  }
+
+  auto f = fs->smfile;
+
   
   this->setColumnCount(2);
 
@@ -1001,9 +1040,9 @@ Q_DECLARE_METATYPE(NoteType);
 QWidget* KVTreeViewDelegate::createEditor
 (QWidget* parent, const QStyleOptionViewItem& /*option*/,  const QModelIndex& index) const
 {
-  eprintfln("createEditor called | getting item from index %d", index.row());
+  log_debug("createEditor called | getting item from index %d", index.row());
   QStandardItem *item = model->itemFromIndex(index);
-  eprintf("it has %d columns, and ", item->columnCount());
+  log_debug("it has %d columns, and ...", item->columnCount());
 
   assert(item);
   QVariant qdata = item->data();
@@ -1011,8 +1050,8 @@ QWidget* KVTreeViewDelegate::createEditor
 
   MATCH (data) {
     if (0) {}
-    else WHEN (GameType *,
-      eprintfln("... seems like gametype to me");
+    else WHEN (GameType *, 
+      log_debug("... seems like gametype to me");
       QComboBox *combo = new QComboBox(parent);
       for (GameType gt : gametypes) {
         QString str = u"%1 (%2 keys)"_s
@@ -1024,8 +1063,8 @@ QWidget* KVTreeViewDelegate::createEditor
       combo->setCurrentIndex((int)*_unpacked);
       return combo;
     )
-    else WHEN (DiffType *,
-      eprintfln("... seems like difftype to me");
+    else WHEN (DiffType *, {
+      log_debug("... seems like difftype to me");
       QComboBox *combo = new QComboBox(parent);
       for (DiffType dt : difftypes) {
         const char *cstr = difftype_to_cstr(dt);
@@ -1033,20 +1072,24 @@ QWidget* KVTreeViewDelegate::createEditor
       }
       combo->setCurrentIndex((int)*_unpacked);
       return combo;
-    )
-    else WHEN(std::string *, 
+    })
+    else WHEN(std::string *, {
       // in some fields there are no data, it thinks it's a std::string * (but null)
       if (_unpacked == nullptr) {
-        eprintfln("... seems like nothing to me"); return nullptr;
+        log_warn("... seems like nothing to me"); return nullptr;
       }
-      eprintfln("seems like string %s to me", _unpacked->c_str());
+      if (_unpacked->c_str() == nullptr) {
+        log_err("it is a string but the cstr is null, crashing...");
+        assert(false);
+      }
+      log_debug("seems like string %s to me", _unpacked->c_str());
       std::string str = *_unpacked;
       auto *lineEdit = new QLineEdit(parent);
       lineEdit->setText(qs(str));
       return lineEdit;
-    )
+    })
     else WHEN (DoubleField, 
-      eprintfln("seems like double to me");
+      log_debug("seems like double to me");
       auto *doubleSpinBox = new QDoubleSpinBox(parent);
 
       // TODO: I don't know how to deal with Shift here
@@ -1074,7 +1117,7 @@ QWidget* KVTreeViewDelegate::createEditor
     )
     else WHEN(uint32_t *, 
       (void)_unpacked;
-      eprintfln("seems like uint32_t to me");
+      log_debug("seems like uint32_t to me");
 
       auto *spinBox = new QSpinBox(parent);
       // -- it wants int, UINT32_MAX would be -1
@@ -1085,7 +1128,7 @@ QWidget* KVTreeViewDelegate::createEditor
     // -- TODO row editing
     else WHEN(NoteRow *,
       (void)_unpacked;
-      eprintfln("seems like a noterow to me");
+      log_debug("seems like a noterow to me");
 
       auto *editor = new QLineEdit(parent);
       editor->setMaxLength(4);
@@ -1101,7 +1144,7 @@ QWidget* KVTreeViewDelegate::createEditor
       return editor;
     )
     else {
-      eprintfln("seems like some unhandled type variant");
+      log_warn("seems like some unhandled type variant");
       // assert(false && "non-exhaustive variant");
       return nullptr; // for now
     }
@@ -1112,7 +1155,7 @@ QWidget* KVTreeViewDelegate::createEditor
 
 NoteRow qstr_to_noterow(const QString &str)
 {
-  eprintfln("length is %lld", str.size());
+  log_debug("length is %lld", str.size());
   if (str.size() != 4) assert(false);
   NoteRow nr;
   for (auto [i,c] : enumerate(str)) {
@@ -1124,7 +1167,7 @@ NoteRow qstr_to_noterow(const QString &str)
 
 void KVTreeViewDelegate::setModelData(QWidget *editor, QAbstractItemModel *model, const QModelIndex &index) const {
   (void)model;
-  eprintfln("in setModelData()");
+  log_debug("in setModelData()");
   QStandardItem *item = this->model->itemFromIndex(index);
   QVariant target_qv = item->data();
   TreeValue target_v = target_qv.value<TreeValue>();
@@ -1159,7 +1202,7 @@ void KVTreeViewDelegate::setModelData(QWidget *editor, QAbstractItemModel *model
       *_unpacked = nr;
     )
     else {
-      eprintfln("Warning: unhandled edit type, the new value will not be set");
+      log_debug("Warning: unhandled edit type, the new value will not be set");
     }
   }
   this->model->rebuild_the_entire_model_from_ground_truth();
@@ -1183,6 +1226,7 @@ struct MainWindow : public QMainWindow {
   QHBoxLayout *root_hlayout;
 #endif
       QWidget *left_button_stripe;
+        QPushButton *tree_btn;
       QWidget *right_column;
         // QVBoxLayout *preview_tile;
           QFrame *why; // useless wrapper around status bar (maybe unnecessary)
@@ -1208,12 +1252,13 @@ struct MainWindow : public QMainWindow {
     state.smfile = smfile;
     state.path = std::string(path);
     this->state.loaded_files.push_back(state);
+    this->state.cur_tab = this->state.loaded_files.size()-1;
   };
 
 
   MainWindow() {
 
-    eprintfln("Building up the widget hierarchy..."); 
+    log_info("Building up the widget hierarchy..."); 
     {
     #ifdef SPLITTER
       this->root = new QWidget(this);
@@ -1231,18 +1276,25 @@ struct MainWindow : public QMainWindow {
       this->root->setLayout(root_hlayout);
     #endif
 
-      eprintfln("Column 1...");
-      this->left_button_stripe = new QWidget(root);
+      log_debug("Column 1...");
+      this->left_button_stripe = new QWidget(this->root);
       {
+        // eprintfln("1");
         auto vbox = new QVBoxLayout();
+        // eprintfln("2");
+        this->tree_btn = new QPushButton("Tree"); vbox->addWidget(tree_btn);
+        // eprintfln("3");
+        root_hlayout->addWidget(this->left_button_stripe);
+        // eprintfln("4");
+
+        auto space = new QSpacerItem(0, 0, QSizePolicy::Expanding, QSizePolicy::Expanding);
+        vbox->addSpacerItem(space);
+         
         this->left_button_stripe->setLayout(vbox);
-        auto b1 = new QPushButton("B1"); this->left_button_stripe->layout()->addWidget(b1);
-        auto b2 = new QPushButton("B2"); this->left_button_stripe->layout()->addWidget(b2);
-        auto b3 = new QPushButton("B3"); this->left_button_stripe->layout()->addWidget(b3);
       }
 
-      eprintfln("Column 2...");
-      this->tree_view = new QTreeView(root);
+      log_debug("Column 2...");
+      this->tree_view = new QTreeView(this->root);
       {
         #ifdef SPLITTER
           resizable_layout->addWidget(tree_view);
@@ -1250,15 +1302,24 @@ struct MainWindow : public QMainWindow {
           root_hlayout->addWidget(tree_view);
           root_hlayout->setStretchFactor(tree_view, 1);
         #endif
+
+        QObject::connect(
+          this->tree_btn,
+          &QPushButton::clicked,
+          this->tree_view,
+          [&](){
+            this->tree_view->setVisible(!this->tree_view->isVisible());
+          }
+        );
       }
 
-      eprintfln("Column 3...");
-      this->right_column = new QWidget(root);
+      log_debug("Column 3...");
+      this->right_column = new QWidget(this->root);
       {
         auto vbox = new QVBoxLayout(); this->right_column->setLayout(vbox);
 
 
-        eprintfln("Tab bar...");
+        log_debug("Tab bar...");
         {
           this->tab_bar = new QTabBar(this->right_column);
           vbox->addWidget(tab_bar);
@@ -1269,11 +1330,12 @@ struct MainWindow : public QMainWindow {
           // -- XXX: these are unhandled, and it should be a tabwidget for fucks sake (at least for now)
           // tab_bar->setTabsClosable(true);
           // tab_bar->setMovable(true);
-          // tab_bar->setStyleSheet("QTabBar::tab {max-width: 100px;}");
-          // tab_bar->setElideMode(Qt::ElideRight);
+          tab_bar->setStyleSheet("QTabBar::tab {max-width: 300px;}");
+          tab_bar->setElideMode(Qt::ElideRight);
+          tab_bar->setExpanding(false);
         }
 
-        eprintfln("Actual preview...");
+        log_debug("Actual preview...");
         {
           this->preview_actual = new NoteDisplayWidget(
             this->right_column,
@@ -1290,31 +1352,37 @@ struct MainWindow : public QMainWindow {
           vbox->addWidget(this->preview_actual, 8);
         }
 
-        eprintfln("Status bar text...");
+        log_debug("Status bar text...");
         {
           // another fake widget, maye this is not necessary
+          eprintfln("1");
           this->why        = new QFrame(this->right_column);
+          eprintfln("2");
           this->status_bar = new TextStatusBar(this->why, &this->state, this->preview_actual);
           // CHK: there was an additional add of the inner widget, check this again
           // it might be broken
+          eprintfln("3");
           vbox->addWidget(this->why, 0);
+          eprintfln("4");
           vbox->setAlignment(this->why, Qt::AlignCenter);
 
           // -- so I can draw status_bar.redraw() inside NoteDisplayWidget later;
           // -- spaghetti, I know, but don't have a much better idea because of
           // -- how everything has to have pointers to other stuff
+          eprintfln("5");
           this->preview_actual->status_bar = this->status_bar;
+          eprintfln("6");
           this->status_bar->note_display_widget = this->preview_actual;
         }
 
-        eprintfln("Preview controls...");
+        log_debug("Preview controls...");
         {
           this->preview_controls = new QWidget(this->right_column);
           auto hbox = new QHBoxLayout();
           this->preview_controls->setLayout(hbox);
 
           
-          eprintfln("Checkbox...");
+          log_debug("Checkbox...");
           {
             this->downscroll_chk = new QCheckBox("Downscroll");
             QObject::connect(
@@ -1329,11 +1397,11 @@ struct MainWindow : public QMainWindow {
             hbox->setAlignment(this->downscroll_chk, Qt::AlignLeft);
           }
 
-          eprintfln("CMOD spinbox...");
+          log_debug("CMOD spinbox...");
           {
-            cmod_spinbox_label = new QLabel("CMOD");
-            hbox->addWidget(cmod_spinbox_label, 1);
-            hbox->setAlignment(cmod_spinbox_label, Qt::AlignCenter);
+            this->cmod_spinbox_label = new QLabel("CMOD");
+            hbox->addWidget(this->cmod_spinbox_label, 1);
+            hbox->setAlignment(this->cmod_spinbox_label, Qt::AlignCenter);
             this->cmod_spinbox = new ExponentialSpinBox();
             this->cmod_spinbox->setDecimals(0);
             this->cmod_spinbox->setMinimum(50);
@@ -1346,9 +1414,12 @@ struct MainWindow : public QMainWindow {
               this->preview_actual,
               &NoteDisplayWidget::onCmodChange
             );
-            this->preview_actual->onCmodChange(cmod_spinbox->value());
-            hbox->addWidget(cmod_spinbox, 1);
-            hbox->setAlignment(cmod_spinbox, Qt::AlignCenter);
+            // -- Initially set preview_actual with current default value of 700.
+            // -- This crashes if no files are loaded yet. Commenting it out for now.
+            // this->preview_actual->onCmodChange(this->cmod_spinbox->value());
+
+            hbox->addWidget(this->cmod_spinbox, 1);
+            hbox->setAlignment(this->cmod_spinbox, Qt::AlignCenter);
           }
           vbox->addWidget(this->preview_controls, 0);
           
@@ -1363,13 +1434,13 @@ struct MainWindow : public QMainWindow {
       #endif
       }
 
-      eprintfln("Menubar...");
+      log_debug("Menubar...");
       {
         QMenuBar *menuBar = this->menuBar();
 
-        eprintfln("File menu...");
+        log_debug("File menu...");
         {
-          QMenu *fileMenu = menuBar->addMenu("File");
+          auto fileMenu = menuBar->addMenu("File");
           QAction *openAction = fileMenu->addAction("Open");
           connect(openAction, &QAction::triggered, this, [&](){
             QString fileName = QFileDialog::getOpenFileName(
@@ -1387,15 +1458,17 @@ struct MainWindow : public QMainWindow {
           });
           QAction *exitAction = fileMenu->addAction("Exit");
           connect(exitAction, &QAction::triggered, this, &QWidget::close);
-        }
 
-        // w_tabs_root.show();
-        // this->setCentralWidget(&w_tabs_root);
+          auto aboutMenu = menuBar->addMenu("About");
+          auto nothing = aboutMenu->addAction("Everything is broken for now.");
+          nothing->setDisabled(true);
+        }
       }
+      this->setCentralWidget(this->root);
     }
 
 
-    eprintfln("Loading files..."); 
+    log_debug("Loading files..."); 
     {
       load_file_unchecked_for_now("ext/Shannon's Theorem.sm");
       load_file_unchecked_for_now("ext/Yatsume Ana.sm");
@@ -1403,9 +1476,9 @@ struct MainWindow : public QMainWindow {
     }
 
 
-    eprintfln("Setting up model/view things..."); 
+    log_info("Setting up model/view things..."); 
     {
-      this->tree_model = new KVTreeModel(nullptr);
+      this->tree_model = new KVTreeModel(nullptr); assert(this->tree_model);
       this->tree_model->state = &this->state;
       this->tree_model->view  = this->tree_view;
       this->tree_view_delegate = new KVTreeViewDelegate(tree_model);
@@ -1417,7 +1490,7 @@ struct MainWindow : public QMainWindow {
     } 
 
 
-    eprintfln("Wiring up callbacks...");
+    log_info("Wiring up callbacks...");
     {
       QObject::connect(
         this->tree_view,
