@@ -98,6 +98,7 @@ using std::ranges::views::enumerate;
 // @forward-declarations -----------------------------------------------------------------------
 struct NoteDisplayWidget;
 struct State;
+struct KVTreeModel;
 
 // @shortfns
 QString qs(std::string const &s) { return QString::fromStdString(s); }
@@ -105,25 +106,28 @@ QString qs(std::string const &s) { return QString::fromStdString(s); }
 // @structures ----------------------------------------------------------------------------------------------------
 struct TextStatusBar : public QWidget {
   State *state;
-
   NoteDisplayWidget *note_display_widget;
 
   QHBoxLayout container;
   QLabel label_pos;
-  QPushButton btn_reset_weird_snap;
+  QPushButton btn_to_reset_weird_snap;
   QLabel label_snap;
 
-  TextStatusBar(QWidget *parent, State *state);
-  TextStatusBar(TextStatusBar &whytho) = delete;
-
+  TextStatusBar(QWidget *parent, State *state, NoteDisplayWidget *note_display_widget);
   void redraw();
 };
 
 struct NoteDisplayWidget : public QWidget {
   State *state;
   TextStatusBar *status_bar;
+  KVTreeModel *model;
 
-  NoteDisplayWidget(QWidget *parent) : QWidget(parent) {
+  NoteDisplayWidget(QWidget *parent, State *state, TextStatusBar *status_bar, KVTreeModel *model)
+  : QWidget(parent)
+  , state(state)
+  , status_bar(status_bar)
+  , model(model)
+  {
     setFocusPolicy(Qt::StrongFocus);
   }
 
@@ -377,17 +381,22 @@ struct State {
 
 
 
-TextStatusBar::TextStatusBar(QWidget *parent, State *state) : QWidget(parent), state(state) /*: QWidget(parent) */ {
+TextStatusBar::TextStatusBar(QWidget *parent, State *state, NoteDisplayWidget *note_display_widget)
+: QWidget(parent)
+, state(state)
+, note_display_widget(note_display_widget)
+{
   auto s = this->state;
 
   this->container.addWidget(&this->label_pos, 0);
-  this->container.addWidget(&this->btn_reset_weird_snap, 0);
+  this->container.addWidget(&this->btn_to_reset_weird_snap, 0);
   this->container.addWidget(&this->label_snap, 0);
   // container.setParent(this);
   this->setLayout(&this->container);
   this->setParent(parent);
+
   QObject::connect(
-    &this->btn_reset_weird_snap,
+    &this->btn_to_reset_weird_snap,
     &QPushButton::clicked,
     this,
     [&](){
@@ -411,10 +420,10 @@ void TextStatusBar::redraw() {
     .arg(QString::number(f->cur_chart_pos.smticks, 'g', 4))
   );
 
-  this->btn_reset_weird_snap.setText("(Reset)");
+  this->btn_to_reset_weird_snap.setText("(Reset)");
   // -- this doesn't work, and I'm doing the styleditemdelegate dance again
   // this->btn_reset_weird_snap.setText("(<span style='text-decoration: underline;'>Reset</span>)");
-  this->btn_reset_weird_snap.setStyleSheet("margin: 0em; border: 0em; font-weight: 600;");
+  this->btn_to_reset_weird_snap.setStyleSheet("margin: 0em; border: 0em; font-weight: 600;");
 
   // -- getters/setters were a mistake...
   // QFont font = this->btn_reset_weird_snap.font();
@@ -431,9 +440,9 @@ void TextStatusBar::redraw() {
   );
 
   if (!smticks_are_sane(f->cur_chart_pos.smticks, f->cur_snap_nths)) {
-    this->btn_reset_weird_snap.show();
+    this->btn_to_reset_weird_snap.show();
   } else {
-    this->btn_reset_weird_snap.hide();
+    this->btn_to_reset_weird_snap.hide();
   }
 }
 
@@ -461,8 +470,7 @@ void NoteDisplayWidget::keyPressEvent(QKeyEvent *event) {
   // this->sm_file_view->update();
   // this->redraw();
   this->update();
-  // XXX
-  this->view->rebuild_the_entire_model_from_ground_truth();
+  this->model->rebuild_the_entire_model_from_ground_truth();
 }
 
 void NoteDisplayWidget::paintEvent(QPaintEvent */*event*/) {
@@ -1175,15 +1183,32 @@ struct MainWindow : public QMainWindow {
   QHBoxLayout *root_hlayout;
 #endif
       QWidget *left_button_stripe;
-      QWidget *right_chunk;
+      QWidget *right_column;
         // QVBoxLayout *preview_tile;
           QFrame *why; // useless wrapper around status bar (maybe unnecessary)
             TextStatusBar *status_bar;
           NoteDisplayWidget *preview_actual;
-          // QHBoxLayout *preview_controls;
+          QWidget *preview_controls;
             QCheckBox *downscroll_chk;
             QLabel *cmod_spinbox_label;
             ExponentialSpinBox *cmod_spinbox;
+
+
+
+  void load_file_unchecked_for_now(const char *path) {
+    // XXX: this constructor is a bit dubious but I'll keep it for now
+    auto smfile_opt = filepath_to_smfile_opt(path);
+    // TODO: if fail, write error on statusbar at bottom of window instead of crashing
+    auto smfile = std::get<SmFile>(smfile_opt);
+
+    const char *base_path = basename((char *)path);
+    this->tab_bar->addTab(qs(smfile.title));
+    this->tab_bar->setTabToolTip(tab_bar->count()-1, qs(base_path));
+    SmFileState state;
+    state.smfile = smfile;
+    state.path = std::string(path);
+    this->state.loaded_files.push_back(state);
+  };
 
 
   MainWindow() {
@@ -1206,6 +1231,7 @@ struct MainWindow : public QMainWindow {
       this->root->setLayout(root_hlayout);
     #endif
 
+      eprintfln("Column 1...");
       this->left_button_stripe = new QWidget(root);
       {
         auto vbox = new QVBoxLayout();
@@ -1215,6 +1241,7 @@ struct MainWindow : public QMainWindow {
         auto b3 = new QPushButton("B3"); this->left_button_stripe->layout()->addWidget(b3);
       }
 
+      eprintfln("Column 2...");
       this->tree_view = new QTreeView(root);
       {
         #ifdef SPLITTER
@@ -1225,14 +1252,15 @@ struct MainWindow : public QMainWindow {
         #endif
       }
 
-      this->right_chunk = new QWidget(root);
+      eprintfln("Column 3...");
+      this->right_column = new QWidget(root);
       {
-        auto vbox = new QVBoxLayout(); this->right_chunk->setLayout(vbox);
+        auto vbox = new QVBoxLayout(); this->right_column->setLayout(vbox);
 
 
         eprintfln("Tab bar...");
         {
-          this->tab_bar = new QTabBar(this->right_chunk);
+          this->tab_bar = new QTabBar(this->right_column);
           vbox->addWidget(tab_bar);
           QWidget::connect(
             tab_bar, &QTabBar::tabCloseRequested,
@@ -1247,7 +1275,12 @@ struct MainWindow : public QMainWindow {
 
         eprintfln("Actual preview...");
         {
-          this->preview_actual = new NoteDisplayWidget(this->right_chunk);
+          this->preview_actual = new NoteDisplayWidget(
+            this->right_column,
+            &this->state,
+            this->status_bar,
+            this->tree_model // NOTE: this is still NULL at this moment!!!
+          );
           {
             auto pal = preview_actual->palette();
             pal.setColor(QPalette::Window, Qt::black);
@@ -1260,187 +1293,158 @@ struct MainWindow : public QMainWindow {
         eprintfln("Status bar text...");
         {
           // another fake widget, maye this is not necessary
-          this->why        = new QFrame(this->right_chunk);
-          this->status_bar = new TextStatusBar(this->why, &this->state);
+          this->why        = new QFrame(this->right_column);
+          this->status_bar = new TextStatusBar(this->why, &this->state, this->preview_actual);
+          // CHK: there was an additional add of the inner widget, check this again
+          // it might be broken
           vbox->addWidget(this->why, 0);
+          vbox->setAlignment(this->why, Qt::AlignCenter);
+
+          // -- so I can draw status_bar.redraw() inside NoteDisplayWidget later;
+          // -- spaghetti, I know, but don't have a much better idea because of
+          // -- how everything has to have pointers to other stuff
+          this->preview_actual->status_bar = this->status_bar;
+          this->status_bar->note_display_widget = this->preview_actual;
         }
-        // XXX AAAAAAAAAAAAAAAAAAAAAAA I SToPped hEEEEEEEEEEEEEEEEre
 
+        eprintfln("Preview controls...");
+        {
+          this->preview_controls = new QWidget(this->right_column);
+          auto hbox = new QHBoxLayout();
+          this->preview_controls->setLayout(hbox);
 
+          
+          eprintfln("Checkbox...");
+          {
+            this->downscroll_chk = new QCheckBox("Downscroll");
+            QObject::connect(
+              this->downscroll_chk,
+              &QCheckBox::checkStateChanged,
+              this->preview_actual,
+              &NoteDisplayWidget::onDownscrollChange
+            );
+            this->downscroll_chk->setCheckState(Qt::Checked);
+
+            hbox->addWidget(this->downscroll_chk, 6);
+            hbox->setAlignment(this->downscroll_chk, Qt::AlignLeft);
+          }
+
+          eprintfln("CMOD spinbox...");
+          {
+            cmod_spinbox_label = new QLabel("CMOD");
+            hbox->addWidget(cmod_spinbox_label, 1);
+            hbox->setAlignment(cmod_spinbox_label, Qt::AlignCenter);
+            this->cmod_spinbox = new ExponentialSpinBox();
+            this->cmod_spinbox->setDecimals(0);
+            this->cmod_spinbox->setMinimum(50);
+            this->cmod_spinbox->setMaximum(1000);
+            this->cmod_spinbox->setValue(700);
+            this->cmod_spinbox->setExponentialFactor(1.05);
+            QObject::connect(
+              this->cmod_spinbox,
+              &ExponentialSpinBox::valueChanged,
+              this->preview_actual,
+              &NoteDisplayWidget::onCmodChange
+            );
+            this->preview_actual->onCmodChange(cmod_spinbox->value());
+            hbox->addWidget(cmod_spinbox, 1);
+            hbox->setAlignment(cmod_spinbox, Qt::AlignCenter);
+          }
+          vbox->addWidget(this->preview_controls, 0);
+          
+        }
+
+        // UGHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
+      #ifdef SPLITTER
+        this->resizable_layout->addWidget(right_chunk);
+      #else
+        this->root_hlayout->addWidget(right_column);
+        this->root_hlayout->setStretchFactor(right_column, 2);
+      #endif
+      }
+
+      eprintfln("Menubar...");
+      {
+        QMenuBar *menuBar = this->menuBar();
+
+        eprintfln("File menu...");
+        {
+          QMenu *fileMenu = menuBar->addMenu("File");
+          QAction *openAction = fileMenu->addAction("Open");
+          connect(openAction, &QAction::triggered, this, [&](){
+            QString fileName = QFileDialog::getOpenFileName(
+              this,
+              "Open File",
+              nullptr, // current dir
+              "Stepmania files (*.sm)"
+            );
+            if (fileName != nullptr) {
+              std::string std_fileName = fileName.toStdString();
+              const char *c_fileName = std_fileName.c_str();
+              eprintfln("chosen file name: %s", c_fileName);
+              load_file_unchecked_for_now(c_fileName);
+            }
+          });
+          QAction *exitAction = fileMenu->addAction("Exit");
+          connect(exitAction, &QAction::triggered, this, &QWidget::close);
+        }
+
+        // w_tabs_root.show();
+        // this->setCentralWidget(&w_tabs_root);
       }
     }
 
 
-    eprintfln("Loading data..."); 
+    eprintfln("Loading files..."); 
     {
-      static auto load_file = [&](const char *path) {
-        // XXX: this constructor is a bit dubious but I'll keep it for now
-        auto smfile_opt = filepath_to_smfile_opt(path);
-        // TODO: if fail, write error on statusbar at bottom of window instead of crashing
-        auto smfile = std::get<SmFile>(smfile_opt);
-
-        const char *base_path = basename((char *)path);
-        this->tab_bar->addTab(qs(smfile.title));
-        this->tab_bar->setTabToolTip(tab_bar->count()-1, qs(base_path));
-        SmFileState state;
-        state.smfile = smfile;
-        state.path = std::string(path);
-        this->state.loaded_files.push_back(state);
-      };
-
-      load_file("ext/Shannon's Theorem.sm");
-      load_file("ext/Yatsume Ana.sm");
-      // load_file("ext/psychology.sm"); // -- this is multi bpm, also boo find a more interesting file
+      load_file_unchecked_for_now("ext/Shannon's Theorem.sm");
+      load_file_unchecked_for_now("ext/Yatsume Ana.sm");
+      // load_file_unchecked_for_now("ext/psychology.sm"); // -- this is multi bpm, also boo find a more interesting file
     }
 
 
-    eprintfln("Putting data into widgets..."); 
+    eprintfln("Setting up model/view things..."); 
     {
-      tree_model = new KVTreeModel(nullptr);
-      tree_model->state = &this->state;
-      tree_model->view  = this->tree_view;
-      tree_view_delegate = new KVTreeViewDelegate(tree_model);
+      this->tree_model = new KVTreeModel(nullptr);
+      this->tree_model->state = &this->state;
+      this->tree_model->view  = this->tree_view;
+      this->tree_view_delegate = new KVTreeViewDelegate(tree_model);
 
-      tree_view->setModel(tree_model);
-      tree_view->setItemDelegate(tree_view_delegate);
+      this->tree_view->setModel(tree_model);
+      this->tree_view->setItemDelegate(tree_view_delegate);
 
-      tree_model->rebuild_the_entire_model_from_ground_truth();
+      this->tree_model->rebuild_the_entire_model_from_ground_truth();
     } 
 
 
-
-    
-
-    // ----------------------- @build_ui ------------------------------------------------
-
-
-
-
-      // -- this shows up
-      // QLabel aaaaa;
-      // aaaaa.setText("aaaaaaaaaaaaaaaaaaa");
-      // preview_tile.addWidget(&aaaaa, 0);
-
-
-      // -- so I can draw status_bar.redraw() inside NoteDisplayWidget later;
-      // -- spaghetti, I know, but don't have a much better idea rn
-      preview_actual->status_bar = status_bar;
-      status_bar->note_display_widget = preview_actual;
-
-
-      // -- .show() spawns it in a new window, we don't want that
-
+    eprintfln("Wiring up callbacks...");
+    {
       QObject::connect(
-        tree_view,
+        this->tree_view,
         &QTreeView::doubleClicked,
-        preview_actual,
-        // somehow get the item I'm clicking on. That item should store a ref
-        // to actual pos. Tell NoteDisplayWidget to seek to that pos and
-        // refresh itself.
+        this->preview_actual,
+
         [&](const QModelIndex &index){
           if (!index.isValid()) return;
-          QStandardItem *qitem = tree_model->itemFromIndex(index);
+          QStandardItem *qitem = this->tree_model->itemFromIndex(index);
           QVariant qvar = qitem->data();
           TreeValue row_var = UNPACK(qvar);
 
+          // If a row I'm double clicking on is a line with measure info,
+          // jump to the position which I stored there
           MATCH (row_var) {
-            WHEN(SmRelativePos, // clicked on a measure
-              this->state.cur_chart_pos = _unpacked;
+            WHEN(SmRelativePos,
+              this->state.cur_file_state()->cur_chart_pos = _unpacked;
             )
-          }
-          // if (0) {
-          // } else if (std::holds_alternative<NoteRow *>(row_var)) { // clicked on note data
-          //   // nothing for now
-          // } else if (std::holds_alternative<SmRelativePos>(row_var)) { // clicked on a measure
-          //   auto new_pos = std::get<SmRelativePos>(row_var);
-          //   cur_chart_pos = new_pos;
-          // }
-      
+          }      
+          // And refresh itself (XXX hacky for now, there should be a unified way)
           status_bar->redraw();
           preview_actual->update();
         }
       );
+    }
 
-      // -- OH MY GOD. Make a build_ui function please.
-      preview_tile->addWidget(status_bar, 0);
-      preview_tile->setAlignment(status_bar, Qt::AlignCenter);
-
-      preview_controls = new QHBoxLayout;
-
-        downscroll_chk = new QCheckBox("Downscroll");
-          QObject::connect(
-            downscroll_chk,
-            &QCheckBox::checkStateChanged,
-            preview_actual,
-            &NoteDisplayWidget::onDownscrollChange
-          );
-          downscroll_chk->setCheckState(Qt::Checked);
-        preview_controls->addWidget(downscroll_chk, 6);
-        preview_controls->setAlignment(downscroll_chk, Qt::AlignCenter);
-
-        cmod_spinbox_label = new QLabel();
-        preview_controls->addWidget(cmod_spinbox_label, 1);
-        preview_controls->setAlignment(cmod_spinbox_label, Qt::AlignCenter);      
-
-        cmod_spinbox = new ExponentialSpinBox();
-          cmod_spinbox->setDecimals(0);
-          cmod_spinbox->setMinimum(50);
-          cmod_spinbox->setMaximum(1000);
-          cmod_spinbox->setValue(700);
-          cmod_spinbox->setExponentialFactor(1.05);
-          QObject::connect(
-            cmod_spinbox,
-            &ExponentialSpinBox::valueChanged,
-            preview_actual,
-            &NoteDisplayWidget::onCmodChange
-          );
-          cmod_spinbox_label->setText("CMOD");
-          preview_actual->onCmodChange(cmod_spinbox->value());
-        preview_controls->addWidget(cmod_spinbox, 1);
-        preview_controls->setAlignment(cmod_spinbox, Qt::AlignCenter);
-      preview_tile->addLayout(preview_controls, 0);
-
-
-  #ifdef SPLITTER
-    resizable_layout->addWidget(right_chunk);
-  #else
-    root_hlayout->addWidget(right_chunk);
-    root_hlayout->setStretchFactor(right_chunk, 2);
-  #endif
-
-
-    // -- menu bar
-    QMenuBar *menuBar = this->menuBar();
-    QMenu *fileMenu = menuBar->addMenu("File");
-
-    QAction *openAction = fileMenu->addAction("Open");
-    connect(openAction, &QAction::triggered, this, [&](){
-      QString fileName = QFileDialog::getOpenFileName(
-        this,
-        "Open File",
-        nullptr, // current dir
-        "Stepmania files (*.sm)"
-      );
-      if (fileName != nullptr) {
-        std::string std_fileName = fileName.toStdString();
-        const char *c_fileName = std_fileName.c_str();
-        eprintfln("chosen file name: %s", c_fileName);
-
-        // SmFileView *file = new SmFileView(c_fileName);
-        // assert(file != nullptr);
-        // const char *bn = basename((char *)c_fileName);
-        // w_tabs_root.addTab(file, QString(bn));
-        // w_tabs_root.setTabToolTip(w_tabs_root.count()-1, c_fileName);
-        load_file(c_fileName);
-      }
-    });
-    QAction *exitAction = fileMenu->addAction("Exit");
-    connect(exitAction, &QAction::triggered, this, &QWidget::close);
-
-
-    // w_tabs_root.show();
-    this->setCentralWidget(&w_tabs_root);
-
+    // ----------------------- @build_ui ------------------------------------------------
   }
 };
 
