@@ -154,7 +154,6 @@ struct NoteDisplayWidget : public QWidget {
   double px_per_smtick();
   double px_per_current_snap();
 
-  void redraw();
   void wheelEvent(QWheelEvent *event) override;
   void paintEvent(QPaintEvent *event) override;
   void keyPressEvent(QKeyEvent *event) override;
@@ -228,7 +227,7 @@ QColor difftype_to_qcolor(DiffType dt)
     case Challenge: return Svg::purple;
     case Edit:      return DarkGray;
   }
-  log_err("FATAL: A DiffType is not a valid value, but this vomit: %d", dt); assert(false);
+  log_err("FATAL: A DiffType is not a valid value, but this vomit: %d", (int)dt); assert(false);
 }
 
 
@@ -389,12 +388,12 @@ struct State {
 
 private:
   std::vector<SmFileState> loaded_files;
-  size_t cur_tab = (size_t)-1;
 
 public:
+  size_t cur_file = (size_t)-1;
   void add_file(SmFileState const& fs) {
     this->loaded_files.push_back(fs);
-    this->cur_tab = (this->cur_tab == (size_t)-1) ? 0 : this->cur_tab;
+    this->cur_file = (this->cur_file == (size_t)-1) ? 0 : this->cur_file;
   }
 
   // All I want to do:
@@ -404,13 +403,12 @@ public:
   // A pointer it is.
   SmFileState *cur_file_state() {
     if (loaded_files.size() > 0) {
-      assert(cur_tab < loaded_files.size());
-      return &loaded_files[cur_tab];
+      assert(cur_file < loaded_files.size());
+      return &loaded_files[cur_file];
     } else {
       return nullptr;
     }
   }
-
 };
 
 
@@ -451,7 +449,6 @@ TextStatusBar::TextStatusBar(QWidget *parent, State *state, NoteDisplayWidget *n
 };
 
 void TextStatusBar::redraw() {
-  // XXX: this is not correct.  We want different positions for different files.
   auto f = this->state->cur_file_state();
   
   this->label_pos.setText(
@@ -462,18 +459,13 @@ void TextStatusBar::redraw() {
   );
 
   this->btn_to_reset_weird_snap.setText("(Reset)");
-  // -- this doesn't work, and I'm doing the styleditemdelegate dance again
-  // this->btn_reset_weird_snap.setText("(<span style='text-decoration: underline;'>Reset</span>)");
   this->btn_to_reset_weird_snap.setStyleSheet("margin: 0em; border: 0em; font-weight: 600;");
-
-  // -- getters/setters were a mistake...
-  // QFont font = this->btn_reset_weird_snap.font();
-  // font.setPointSize(8);
-  // this->btn_reset_weird_snap.setFont(font);
 
   // TODO: There should be a snap policy, which is either of:
   // - exact (some number of smticks)
   // - nearest note
+  // - also, user selected snaps like gallopy triples or polys
+  // Too bad that you need a whole another widget to customize that...
   this->label_snap.setText(
     QString("| Snap <span style='color: %1; font-weight: 600;'>%2</span>")
     .arg(snap_to_cstr_color(f->cur_snap_nths))
@@ -529,10 +521,10 @@ void NoteDisplayWidget::paintEvent(QPaintEvent */*event*/) {
   int32_t px_judge_line_off = 30;
   int32_t left_start = this->width() / 2 - (int32_t)(2 * note_width); // for centering
 
-  QPen pen;
 
-  // draw judge line
+  auto draw_judge_line = [this](QPainter &painter, int32_t px_judge_line_off)
   {
+    QPen pen;
     auto judge_line = QLine(0, px_judge_line_off, this->width()-1, px_judge_line_off);
     if (downscroll) {
       int new_y = this->height() - judge_line.y1();
@@ -540,20 +532,29 @@ void NoteDisplayWidget::paintEvent(QPaintEvent */*event*/) {
     }
     pen.setWidth(5); pen.setColor(Qt::white); painter.setPen(pen);
     painter.drawLine(judge_line);
-  }
+  };
+  draw_judge_line(painter, px_judge_line_off);
 
-  // draw corner beams around the left and right edge of playfield
+
+  auto draw_corner_beams = [this](QPainter &painter, int32_t left_start, int32_t note_width)
   {
+    QPen pen;
     auto left_edge  = QLineF(left_start,              0, left_start,               this->height()-1);
     auto right_edge = QLineF(left_start+note_width*4, 0, left_start+note_width*4,  this->height()-1);
     pen.setWidth(2); pen.setColor(Qt::gray); painter.setPen(pen);
     painter.drawLine(left_edge);
     painter.drawLine(right_edge);
-  }
+  };
+  draw_corner_beams(painter, left_start, note_width);
 
-  // draw snaplines, starting from previous measure
-  {
-    SmRelativePos snap_of_this_snapline = fs->cur_chart_pos;
+
+  auto paint_snap_lines = [this](
+    QPainter &painter, SmFileState *file_state, int32_t column_width, int32_t left_start
+  ) {
+    QPen pen;
+    SmRelativePos snap_of_this_snapline =
+      file_state == nullptr ? file_state->cur_chart_pos : (SmRelativePos){0};
+
     auto s = &snap_of_this_snapline;
     s->measures -= 1;
 
@@ -564,7 +565,7 @@ void NoteDisplayWidget::paintEvent(QPaintEvent */*event*/) {
       //        s->measures, s->beats, s->smticks, y_distance);
 
       if (y_distance < 0.0) {
-        *s = SmRelativePos::incremented_by(*s, 192.0/fs->cur_snap_nths);
+        *s = SmRelativePos::incremented_by(*s, 192.0/file_state->cur_snap_nths);
         continue;
       }
       if (y_distance > this->height()) { break; }
@@ -587,12 +588,13 @@ void NoteDisplayWidget::paintEvent(QPaintEvent */*event*/) {
         std::fmod(s->smticks, 12.) == 0 ? 2 : 1
        );
       painter.setPen(pen);
-      auto snap_line = QLineF(left_start, y, left_start + 4 * note_width, y);
+      auto snap_line = QLineF(left_start, y, left_start + 4 * column_width, y);
       painter.drawLine(snap_line);
 
-      *s = SmRelativePos::incremented_by(*s, 192.0/fs->cur_snap_nths);
+      *s = SmRelativePos::incremented_by(*s, 192.0/file_state->cur_snap_nths);
     }
-  }
+  };
+  paint_snap_lines(painter, fs, note_width, left_start);
 
 
   // NOTE: temporarily
@@ -1292,13 +1294,9 @@ struct MainWindow : public QMainWindow {
       log_debug("Column 1...");
       this->left_button_stripe = new QWidget(this->root);
       {
-        // eprintfln("1");
         auto vbox = new QVBoxLayout();
-        // eprintfln("2");
         this->tree_btn = new QPushButton("Tree"); vbox->addWidget(tree_btn);
-        // eprintfln("3");
         root_hlayout->addWidget(this->left_button_stripe);
-        // eprintfln("4");
 
         auto space = new QSpacerItem(0, 0, QSizePolicy::Expanding, QSizePolicy::Expanding);
         vbox->addSpacerItem(space);
@@ -1337,8 +1335,23 @@ struct MainWindow : public QMainWindow {
           this->tab_bar = new QTabBar(this->right_column);
           vbox->addWidget(tab_bar);
           QWidget::connect(
-            tab_bar, &QTabBar::tabCloseRequested,
-            this, [&](int index){ this->tab_bar->removeTab(index); /* TODO: prompt to save */ }
+            tab_bar,
+            &QTabBar::tabCloseRequested,
+            this,
+            [this](int index){ this->tab_bar->removeTab(index); /* TODO: prompt to save */ }
+          );
+          QWidget::connect(
+            this->tab_bar,
+            &QTabBar::tabBarClicked,
+            this,
+            [this](int index){
+              // this would mean that I clicked on the area beside the tabs
+              if (index != -1) {
+                this->state.cur_file = index;
+                this->status_bar->redraw();
+                this->preview_actual->update();
+              }
+            }
           );
           // -- XXX: these are unhandled, and it should be a tabwidget for fucks sake (at least for now)
           // tab_bar->setTabsClosable(true);
@@ -1370,6 +1383,7 @@ struct MainWindow : public QMainWindow {
           vbox->setAlignment(this->status_bar, Qt::AlignCenter);
 
           // -- mutual pointers, so I can draw status_bar.redraw() inside NoteDisplayWidget later
+          // -- XXX: this is WRONG! you should do redraws centrally, not this 
           this->preview_actual->status_bar = this->status_bar;
           this->status_bar->note_display_widget = this->preview_actual;
         }
@@ -1518,8 +1532,20 @@ struct MainWindow : public QMainWindow {
       );
     }
 
-    // ----------------------- @build_ui ------------------------------------------------
-  }
+    // HACK: now that everything is loaded, actually refresh this guy
+    this->status_bar->redraw();
+    this->preview_actual->update();
+
+  } // MainWindow()
+
+  // ~MainWindow() {
+    // delete cmod_spinbox;
+    // delete cmod_spinbox_label;
+    // delete this->tree_model;
+    // delete this->tree_view;
+    // delete this->tree_view_delegate;
+  // }
+  
 };
 
 
@@ -1538,6 +1564,8 @@ int main(int argc, char **argv) {
   // QLocale::setDefault(locale);
 
   // -- QGuiApplication doesn't work if you want widgets
+  run_auto_restarter(argc, argv);
+
   QApplication app(argc, argv);
   MainWindow window;
   window.show();

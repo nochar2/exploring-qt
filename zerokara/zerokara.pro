@@ -2,7 +2,7 @@ linux {
 	CONFIG = qt import_qpa_plugin \
 		c++2b warn_on rtti_off exceptions_off \
 		debug force_debug_info 
-	QMAKE_LFLAGS += -fuse-ld=mold -lasan -lubsan
+	QMAKE_LFLAGS += -fuse-ld=mold -fsanitize=address,undefined
 }
 win32 {
 	# idk how to make it run windeployqt in the debug dir yet
@@ -16,6 +16,9 @@ QT = widgets                  # (kind of implies `core gui` somehow)
 
 TARGET = zerokara
 SOURCES = zerokara.cpp sm_parser.cpp platform.cpp
+
+### integer, implicit-conversion are not supported ??
+# QMAKE_CXXFLAGS += -fsanitize=address
 QMAKE_CXXFLAGS += -fsanitize=address,undefined
 
 

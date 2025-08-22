@@ -17,9 +17,9 @@ void *exec_yourself(void *arg) {
 void run_auto_restarter(int argc, char **argv) {
   // -- let's try the hot restart thing.
   (void)argc;
-  int inotify_fd = inotify_init1(IN_CLOEXEC);
+  static int inotify_fd = inotify_init1(IN_CLOEXEC);
   inotify_add_watch(inotify_fd, argv[0], IN_ATTRIB);
-  pthread_t inotify_reader;
+  static pthread_t inotify_reader;
   pthread_create(&inotify_reader, NULL, exec_yourself, &inotify_fd);
 }
 

@@ -23,3 +23,7 @@ draw / handle different note types
 
 
 precompiled.h probably shouldn't exist ???
+
+text has dumb but
+
+status_bar->redraw and preview_actual->update are getting stale, centralize this somehow
