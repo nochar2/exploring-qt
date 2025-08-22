@@ -47,7 +47,12 @@ char notetype_to_char(NoteType nt);
 constexpr uint32_t BEATS_PER_MEASURE = 4; // 99.99999 % of all charts
 
 // -- memory inefficient, but we don't care. It's convenient for now!
-struct NoteRow { Array<NoteType, 4> notes; };
+struct NoteRow {
+  Array<NoteType, 4> notes;
+  bool is_zero(void) {
+    return std::all_of(notes.begin(), notes.end(), [](NoteType nt){return nt == NoteType::None;});
+  }
+};
 struct Beat    { Array<NoteRow,48> beat_rows; };
 struct Measure { Array<Beat, BEATS_PER_MEASURE> beats; bool treeview_expanded; };
 

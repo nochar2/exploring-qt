@@ -109,6 +109,12 @@ using std::ranges::views::enumerate;
 #define WHEN(T,bod) if (std::holds_alternative<T>(*_vrnt)) { T _unpacked = std::get<T>(*_vrnt); bod }
 #define MATCH(val) typeof(val) *_vrnt = &val;
 
+  // -- T <-> std::variant <-> QVariant allows you to smuggle a pointer,
+  // -- which QVariant doesn't like for some reason.
+  #define PACK(x)   QVariant::fromValue(TreeValue(x))
+  #define UNPACK(x) x.value<TreeValue>()
+
+
 // @forward-declarations -----------------------------------------------------------------------
 struct NoteDisplayWidget;
 struct State;
@@ -172,6 +178,29 @@ struct SmRelativePos {
   int32_t measures = 0;
   int32_t beats = 0;
   double smticks = 0;
+
+  bool operator<(SmRelativePos other) {
+    // idk how <=> works
+    return
+    this->measures < other.measures ? true :
+    this->measures == other.measures ? (
+      this->beats < other.beats ? true :
+      this->beats == other.beats ? (
+        this->smticks < other.smticks ? true : false
+      ) : false
+    ) : false;
+
+    // return (this->measures < other.measures) ||
+    // (this->measures == other.measures && this->beats < other.beats) ||
+    // (this->measures == other.measures && this->beats == other.beats && this->smticks < other.smticks);
+  }
+  bool operator==(SmRelativePos other) {
+    return
+      this->measures == other.measures &&
+      this->beats == other.beats &&
+      this->smticks == other.smticks // maybe this should be approximate?
+    ;
+  }
 
   static SmRelativePos incremented_by(SmRelativePos pos, double how_many_smticks) {
     pos.smticks += how_many_smticks;
@@ -346,7 +375,10 @@ struct KVTreeModel : public QStandardItemModel {
   /* like why does it want a parent widget? it's not even visual, why is it its business? */
   KVTreeModel(QWidget *parent) : QStandardItemModel(parent) {};
 
+  // XXX: not good because it destroys scroll pos and expand state and other things
   void rebuild_the_entire_model_from_ground_truth();
+
+  void refresh_note_at_pos(SmRelativePos pos);
 
   // -- no longer needed
   // bool setItemData(const QModelIndex &index, const QMap<int,QVariant> &values) override;
@@ -371,9 +403,6 @@ struct KVTreeViewDelegate : public QStyledItemDelegate {
 
 
 
-// TODO! These widgets should be created only once. I will still new() them,
-// but we definitely don't want the case where each file has its own set
-// of widgets because 
 struct SmFileState {
   SmFile smfile;
   std::string path;
@@ -502,8 +531,14 @@ void NoteDisplayWidget::keyPressEvent(QKeyEvent *event) {
 
   // this->sm_file_view->update();
   // this->redraw();
+
+  // this->model->rebuild_the_entire_model_from_ground_truth();
+  
+  // HACK-y as hell
+  this->model->refresh_note_at_pos(pos);
+
   this->update();
-  this->model->rebuild_the_entire_model_from_ground_truth();
+
 }
 
 void NoteDisplayWidget::paintEvent(QPaintEvent */*event*/) {
@@ -733,6 +768,66 @@ void NoteDisplayWidget::wheelEvent(QWheelEvent *event) {
 #define Cell QStandardItem
 
 
+/*
+This SUCKS. The alternative, redrawing everything from scratch, works
+but the scroll pos and expand states get reset every time.
+*/
+void KVTreeModel::refresh_note_at_pos(SmRelativePos data_pos)
+{
+  const int DIFFS_ROW = 1;
+  const int cur_diff = 0; // TODO
+  const int NOTE_ROWS_I = 4;
+
+  
+  NoteRow *data_row = &this->state->cur_file_state()
+    ->smfile.diffs[cur_diff]
+    .measures[data_pos.measures].beats[data_pos.beats].beat_rows[data_pos.smticks]
+  ;
+  
+  QStandardItem *model_diff =
+  this->invisibleRootItem()
+    ->child(DIFFS_ROW)
+    ->child(cur_diff);
+
+
+  // 1) update the specific note in the model noterows list
+  QStandardItem *model_rows = model_diff->child(NOTE_ROWS_I);
+
+  QStandardItem *note_row;
+  for (int i = 0; i < model_rows->rowCount(); i++) {
+    // HACK: This actually removes the row, with its column. I don't know
+    // how to access individual columns. I have searched, didn't find it.
+    QList<QStandardItem *> note_row = model_rows->takeRow(i);
+    auto note_row_left = note_row[0];
+
+    SmRelativePos model_pos = std::get<SmRelativePos>(UNPACK(note_row_left->data()));
+    log_debug("[%d] row_pos: %d %d %lg", i, model_pos.measures, model_pos.beats, model_pos.smticks);
+
+
+    // HACK: ... so I have to reinsert it here
+    if (model_pos == data_pos) {
+      note_row[1]->setData(PACK(data_row));
+      model_rows->insertRow(i, note_row);
+    } else if (model_pos < data_pos) {
+      model_rows->insertRow(i, note_row);
+    } else {
+      model_rows->insertRow(i, note_row);
+      break;
+    }
+  }
+
+
+  // if (row.is_zero()) {
+    // TODO: remove the thing
+  // } else {
+    // TODO: add or update the thing
+  // }
+
+
+
+  
+}
+
 void KVTreeModel::rebuild_the_entire_model_from_ground_truth() {
   // -- I construct a Cell (QStandardItem) the following way:
   // -- * the value in constructor is merely a visual string
@@ -753,10 +848,6 @@ void KVTreeModel::rebuild_the_entire_model_from_ground_truth() {
   
   this->setColumnCount(2);
 
-  // -- T <-> std::variant <-> QVariant allows you to smuggle a pointer,
-  // -- which QVariant doesn't like for some reason.
-  #define PACK(x)   QVariant::fromValue(TreeValue(x))
-  #define UNPACK(x) x.value<TreeValue>()
 
   // -- process the string fields separately beacause they are
   // -- annoying and there's many of them. Other types like floats
