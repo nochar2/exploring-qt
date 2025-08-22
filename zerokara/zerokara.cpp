@@ -132,15 +132,16 @@ struct TextStatusBar : public QWidget {
 
 struct NoteDisplayWidget : public QWidget {
   State *state;
+
+  // These two are uninitialized at first
   TextStatusBar *status_bar;
   KVTreeModel *model;
 
-  NoteDisplayWidget(QWidget *parent, State *state, TextStatusBar *status_bar, KVTreeModel *model)
+  NoteDisplayWidget(QWidget *parent, State *state)
   : QWidget(parent)
   , state(state)
-  , status_bar(status_bar)
-  , model(model)
   {
+    assert(parent); assert(state);
     setFocusPolicy(Qt::StrongFocus);
   }
 
@@ -385,8 +386,16 @@ struct SmFileState {
 
 // ground truth data
 struct State {
+
+private:
   std::vector<SmFileState> loaded_files;
   size_t cur_tab = (size_t)-1;
+
+public:
+  void add_file(SmFileState const& fs) {
+    this->loaded_files.push_back(fs);
+    this->cur_tab = (this->cur_tab == (size_t)-1) ? 0 : this->cur_tab;
+  }
 
   // All I want to do:
   // - construct an optional ref, by an injection into the coproduct SmFileState + {nullopt}
@@ -401,6 +410,7 @@ struct State {
       return nullptr;
     }
   }
+
 };
 
 
@@ -412,7 +422,9 @@ TextStatusBar::TextStatusBar(QWidget *parent, State *state, NoteDisplayWidget *n
 , state(state)
 , note_display_widget(note_display_widget)
 {
-  auto s = this->state;
+  assert(parent != NULL);
+  assert(state != NULL);
+  assert(note_display_widget != NULL);
 
   auto hbox = new QHBoxLayout(); this->setLayout(hbox);
   hbox->addWidget(&this->label_pos, 0);
@@ -424,8 +436,8 @@ TextStatusBar::TextStatusBar(QWidget *parent, State *state, NoteDisplayWidget *n
     &this->btn_to_reset_weird_snap,
     &QPushButton::clicked,
     this,
-    [&](){
-      s->cur_file_state()->cur_chart_pos.smticks = 0;
+    [this](){
+      this->state->cur_file_state()->cur_chart_pos.smticks = 0;
       /* TODO redraw a bunch of stuff */
       this->redraw();
       this->note_display_widget->update();
@@ -545,8 +557,8 @@ void NoteDisplayWidget::paintEvent(QPaintEvent */*event*/) {
     auto s = &snap_of_this_snapline;
     s->measures -= 1;
 
-    // printf("---------------\n");
-    for (int i = 0; i < 300; i++) {
+    const int max_snap_lines = 1000;
+    for (int i = 0; i < max_snap_lines; i++) {
       double y_distance = px_of_measure_zero + s->total_smticks() * px_per_smtick();
       // printf("snap of this snapline: %d:%d:%lg, which translates to %lg px\n",
       //        s->measures, s->beats, s->smticks, y_distance);
@@ -734,7 +746,7 @@ void KVTreeModel::rebuild_the_entire_model_from_ground_truth() {
     return; 
   }
 
-  auto f = fs->smfile;
+  SmFile *f = &fs->smfile;
 
   
   this->setColumnCount(2);
@@ -748,24 +760,25 @@ void KVTreeModel::rebuild_the_entire_model_from_ground_truth() {
   // -- annoying and there's many of them. Other types like floats
   // -- vary too much for abstraction to be useful.
   std::vector<std::tuple<const char *,string *>> string_fields;
-  string_fields.push_back({"#TITLE",     &f.title});
-  string_fields.push_back({"#SUBTITLE",  &f.subtitle});
-  string_fields.push_back({"#ARTIST",    &f.artist});
+  string_fields.push_back({"#TITLE",     &f->title});
+  string_fields.push_back({"#SUBTITLE",  &f->subtitle});
+  string_fields.push_back({"#ARTIST",    &f->artist});
   // -- TODO: some way to say "I want to also consider these translit fields".
   // -- Maybe a right-click menu on Metadata.
-  if (f.has_translit) {
-    string_fields.push_back({"#TITLETRANSLIT",     &f.titletranslit});
-    string_fields.push_back({"#SUBTITLETRANSLIT",  &f.subtitletranslit});
-    string_fields.push_back({"#ARTISTTRANSLIT",    &f.artisttranslit});
+  if (f->has_translit) {
+    string_fields.push_back({"#TITLETRANSLIT",     &f->titletranslit});
+    string_fields.push_back({"#SUBTITLETRANSLIT",  &f->subtitletranslit});
+    string_fields.push_back({"#ARTISTTRANSLIT",    &f->artisttranslit});
   }
-  string_fields.push_back({"#CREDIT",  &f.credit});
-  string_fields.push_back({"#MUSIC",   &f.music});
+  string_fields.push_back({"#CREDIT",  &f->credit});
+  string_fields.push_back({"#MUSIC",   &f->music});
 
   Cell *mtdt_cell = new Cell("Metadata");
   Cell *key_cell;
   Cell *value_cell;
 
   for (auto [key,p_value] : string_fields) {
+    assert(p_value != nullptr);
     key_cell = new Cell(key);
     value_cell = new Cell(qs(*p_value)); value_cell->setData(PACK(p_value));
     mtdt_cell->appendRow({key_cell, value_cell});
@@ -775,26 +788,26 @@ void KVTreeModel::rebuild_the_entire_model_from_ground_truth() {
   // of what type of field it is so I can decide on more reasonable step amounts for QSpinBoxes.
   {
     key_cell = new Cell("#OFFSET");
-    value_cell = new Cell(QString::number(f.offset));
-    DoubleField value = {&(f.offset),SmDoubleKind::Millis};
+    value_cell = new Cell(QString::number(f->offset));
+    DoubleField value = {&(f->offset),SmDoubleKind::Millis};
     value_cell->setData(PACK(value)); mtdt_cell->appendRow({key_cell, value_cell});
   }
   {
     key_cell = new Cell("#SAMPLESTART");
-    value_cell = new Cell(QString::number(f.samplestart));
-    DoubleField value = {&(f.samplestart),SmDoubleKind::Millis};
+    value_cell = new Cell(QString::number(f->samplestart));
+    DoubleField value = {&(f->samplestart),SmDoubleKind::Millis};
     value_cell->setData(PACK(value));
     mtdt_cell->appendRow({key_cell, value_cell});
   }
   {
     key_cell = new Cell("#SAMPLELENGTH");
-    value_cell = new Cell(QString::number(f.samplelength));
-    DoubleField value = {&(f.samplelength),SmDoubleKind::Millis};
+    value_cell = new Cell(QString::number(f->samplelength));
+    DoubleField value = {&(f->samplelength),SmDoubleKind::Millis};
     value_cell->setData(PACK(value)); mtdt_cell->appendRow({key_cell, value_cell});
   }
   {
     key_cell = new Cell("#BPMS"); /*value_cell = new Cell();*/
-    for (auto &pair : f.bpms) {
+    for (auto &pair : f->bpms) {
       auto *beat_cell = new Cell(QString::number(pair.beat_number));
       auto *bpm_cell  = new Cell(QString::number(pair.value));
       DoubleField value = {&pair.value, SmDoubleKind::Bpm};
@@ -805,7 +818,7 @@ void KVTreeModel::rebuild_the_entire_model_from_ground_truth() {
   }
   {
     key_cell = new Cell("#STOPS"); /*value_cell = new Cell();*/
-    for (auto &pair : f.stops) {
+    for (auto &pair : f->stops) {
       auto *beat_cell = new Cell(QString::number(pair.beat_number));
       auto *ms_cell   = new Cell(QString::number(pair.value)); // maybe ??????
       DoubleField value = {&pair.value, SmDoubleKind::Beats};
@@ -821,7 +834,7 @@ void KVTreeModel::rebuild_the_entire_model_from_ground_truth() {
     // diffs_cell->setColumnCount(2);
 
     size_t diff_i = 0;
-    for (auto &diff : f.diffs) {
+    for (auto &diff : f->diffs) {
       auto *num_cell = new Cell(QString::number(diff_i));
       num_cell->setColumnCount(1);
 
@@ -940,7 +953,8 @@ void NoteDisplayWidget::onCmodChange(int value) {
   this->update();
 }
 void NoteDisplayWidget::onDownscrollChange(Qt::CheckState state) {
-  this->downscroll = state == Qt::Checked; this->update();
+  this->downscroll = state == Qt::Checked;
+  this->update();
 }
 
 
@@ -1248,11 +1262,10 @@ struct MainWindow : public QMainWindow {
     const char *base_path = basename((char *)path);
     this->tab_bar->addTab(qs(smfile.title));
     this->tab_bar->setTabToolTip(tab_bar->count()-1, qs(base_path));
-    SmFileState state;
-    state.smfile = smfile;
-    state.path = std::string(path);
-    this->state.loaded_files.push_back(state);
-    this->state.cur_tab = this->state.loaded_files.size()-1;
+    SmFileState smfile_state;
+    smfile_state.smfile = smfile;
+    smfile_state.path = std::string(path);
+    this->state.add_file(smfile_state);
   };
 
 
@@ -1339,9 +1352,7 @@ struct MainWindow : public QMainWindow {
         {
           this->preview_actual = new NoteDisplayWidget(
             this->right_column,
-            &this->state,
-            this->status_bar,
-            this->tree_model // NOTE: this is still NULL at this moment!!!
+            &this->state
           );
           {
             auto pal = preview_actual->palette();
@@ -1354,24 +1365,12 @@ struct MainWindow : public QMainWindow {
 
         log_debug("Status bar text...");
         {
-          // another fake widget, maye this is not necessary
-          eprintfln("1");
-          this->why        = new QFrame(this->right_column);
-          eprintfln("2");
-          this->status_bar = new TextStatusBar(this->why, &this->state, this->preview_actual);
-          // CHK: there was an additional add of the inner widget, check this again
-          // it might be broken
-          eprintfln("3");
-          vbox->addWidget(this->why, 0);
-          eprintfln("4");
-          vbox->setAlignment(this->why, Qt::AlignCenter);
+          this->status_bar = new TextStatusBar(this->right_column, &this->state, this->preview_actual);
+          vbox->addWidget(this->status_bar, 0);
+          vbox->setAlignment(this->status_bar, Qt::AlignCenter);
 
-          // -- so I can draw status_bar.redraw() inside NoteDisplayWidget later;
-          // -- spaghetti, I know, but don't have a much better idea because of
-          // -- how everything has to have pointers to other stuff
-          eprintfln("5");
+          // -- mutual pointers, so I can draw status_bar.redraw() inside NoteDisplayWidget later
           this->preview_actual->status_bar = this->status_bar;
-          eprintfln("6");
           this->status_bar->note_display_widget = this->preview_actual;
         }
 
@@ -1487,6 +1486,8 @@ struct MainWindow : public QMainWindow {
       this->tree_view->setItemDelegate(tree_view_delegate);
 
       this->tree_model->rebuild_the_entire_model_from_ground_truth();
+
+      this->preview_actual->model = this->tree_model;
     } 
 
 
@@ -1528,13 +1529,13 @@ struct MainWindow : public QMainWindow {
 // --------------------------------------------------------------------------------------------------
 // --------------------------------------------------------------------------------------------------
 
+void run_auto_restarter(int argc, char **argv);
+
 int main(int argc, char **argv) {
   // -- make float parsing not break in Czech locale
   // -- XXX: why does this not work? For now, I'll set it nearby float parsing.
   // QLocale locale("C");
   // QLocale::setDefault(locale);
-
-void run_auto_restarter(int argc, char **argv);
 
   // -- QGuiApplication doesn't work if you want widgets
   QApplication app(argc, argv);
