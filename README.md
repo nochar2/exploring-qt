@@ -1,1 +1,3 @@
-completely disgusting code, need to learn it myself without relying on chatbots
+This dir needs to be cleaned up a lot.
+
+

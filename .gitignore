@@ -15,10 +15,13 @@
 # !stl_includes.h
 # !sm_parser.h
 # !dumb_stdlib_linux.h
-!*.pro
+!*.pro*
 !*.txt
 !*.nix
 !*.lock
 !README.md
 !Shannon's Theorem.sm
 !notes/
+
+# let's just use this instead of messing with qmake
+!Makefile
