@@ -1,3 +1,6 @@
+THE PARSER IS OUTDATED, FIND / FIX THE C VERSION AND USE THAT ONE
+
+
 option to say "jump to next / previous note" instead of fixating on snap
 redrawing everything in a model has its issues, store at least expanded/collapsed state?
 	and scroll pos? like it's not a good idea anyway but unsynced state is worse

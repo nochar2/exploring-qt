@@ -1,0 +1,8 @@
+Use:
+	nix develop nixpkgs#qtcreator
+	nix-shell -p qtcreator --run qtcreator
+
+Then it works.
+
+(one, or the other, or in opposite order, or installing locally, or adding glvnd, or adding qt6.full, or adding kdePackages.qtdeclarative, doesn't work.)
+
