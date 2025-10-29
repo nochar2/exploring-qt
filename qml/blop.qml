@@ -1,5 +1,5 @@
-import QtQuick
-import QtQuick.Layouts
+import QtQuick //2.0
+import QtQuick.Layouts //2.0
 
 // RowLayout {
 //     id: rowLayout
