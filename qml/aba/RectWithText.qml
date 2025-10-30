@@ -44,6 +44,7 @@ Item {
     
     gradient: Gradient {
       GradientStop { position: 0.0; color: "transparent"; } 
+      // TODO: there's also Qt.darker you could use it somehow
       GradientStop { position: 3.0; color: "black"; } 
     }
   }

@@ -1,0 +1,4 @@
+QT = core gui
+CONFIG += c++17
+TARGET = ai_wwid
+SOURCES += ai_wwid.cpp

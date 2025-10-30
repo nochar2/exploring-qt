@@ -1,13 +1,19 @@
 import QtQuick
 import QtQuick.Layouts
-RowLayout {
-    Repeater {
-        model: ["red", "green", "blue"]
+Item {
+    width: 800
+    height: 600
 
-        Rectangle {
-            color: modelData
-            height: 20
-            Layout.fillWidth: true
+    RowLayout {
+        anchors.fill: parent
+        Repeater {
+            model: ["red", "green", "blue"]
+
+            Rectangle {
+                color: modelData
+                height: 20
+                Layout.fillWidth: true
+            }
         }
     }
 }
