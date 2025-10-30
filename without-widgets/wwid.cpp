@@ -1,15 +1,18 @@
+#include "qpropertyanimation.h"
 #include <QGuiApplication>
 #include <QWindow>
 #include <QBackingStore>
 #include <QPainter>
 #include <cassert>
 #include <cstdio>
-#include <QPropertyAnimation>
+#include "qpropertyanimation.h"
 #include <iostream>
 #include <print>
 
 struct MyRectangle : QObject {
     QRect area;
+    QPoint pos() { return  { area.x(), area.y() }; }
+    
 
     MyRectangle(QRect pos) : area(pos) { }
     MyRectangle(MyRectangle &other) { this->area = other.area; }
@@ -85,6 +88,13 @@ int main(int argc, char **argv) {
     MyRectangle visRect(rect);
     SimpleWindow window(visRect);
 
+
+    // -- you can only animate qobject properties probably somehow something metaobject thing idk
+    // QPropertyAnimation anim(&visRect, "area.x", nullptr);
+    // anim.setDuration(1000);
+    // anim.setStartValue(0);
+    // anim.setStartValue(200);
+    // anim.start();
 
     window.show();
     return app.exec();
