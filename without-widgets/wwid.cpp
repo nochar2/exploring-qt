@@ -1,26 +1,23 @@
-#include "qpropertyanimation.h"
+// #include "qpropertyanimation.h"
 #include <QGuiApplication>
 #include <QWindow>
 #include <QBackingStore>
 #include <QPainter>
 #include <cassert>
 #include <cstdio>
-#include "qpropertyanimation.h"
-#include <iostream>
-#include <print>
+// #include <iostream>
+// #include <print>
 
 struct MyRectangle : QObject {
     QRect area;
     QPoint pos() { return  { area.x(), area.y() }; }
     
-
     MyRectangle(QRect pos) : area(pos) { }
     MyRectangle(MyRectangle &other) { this->area = other.area; }
 };
 
 
 struct SimpleWindow : QWindow {
-
     // this is stupid design but whatever
     SimpleWindow(MyRectangle rect) : rectObj(rect) {
         setTitle("No Widgets Example");
@@ -34,46 +31,37 @@ protected:
         }
     }
 
-
 private:
     QBackingStore m_backingStore{this};
     MyRectangle rectObj;
 
-
     void renderNow() {
-
         printf("paint happened!\n"); fflush(stdout);
 
-        // Create a backing surface the same size as the window
+        // -- Create a backing surface the same size as the window
         QSize size = this->size();
         m_backingStore.resize(size);
-
-        // QRect rect(0, 0, size.width(), size.height());
 
         auto rect = rectObj.area;
         QRegion whole_screen(rect);
 
         m_backingStore.beginPaint(whole_screen); {
-
-            // WARNING: this pointer is only valid between calls to beginPaint
-            // and endPaint. (Qt docs) (it segfaults otherwise)
+            // -- WARNING: the QPaintDevice pointer is only valid between calls
+            // -- to beginPaint and endPaint. (Qt docs) (it segfaults otherwise,
+            // -- but *isn't* nullptr!)
             QPaintDevice *device = m_backingStore.paintDevice();
-            // printf("device ptr: %p\n", device);
-            // fflush(stdout);
-
             QPainter painter(device);
 
-            // Fill background
+            // -- Fill background
             painter.fillRect(0, 0, size.width(), size.height(), Qt::gray);
 
-            // Draw something
+            // -- Draw something
             painter.setBrush(Qt::red);
-            
-            // std::print("[{} {} {} {}]", rect.x(), rect.y(), rect.width(), rect.height());
-
             painter.drawRect(rect.x(), rect.y(), rect.width(), rect.height());
+            // std::print("[{} {} {} {}]", rect.x(), rect.y(), rect.width(), rect.height());
         } m_backingStore.endPaint();
 
+        // -- this doesn't work, idk why
         // bool b = m_backingStore.scroll({0, 0, 20, 20}, 0, 10);
         // printf("scroll returned %d\n", b);
 
@@ -88,16 +76,8 @@ int main(int argc, char **argv) {
     MyRectangle visRect(rect);
     SimpleWindow window(visRect);
 
-
-    // -- you can only animate qobject properties probably somehow something metaobject thing idk
-    // QPropertyAnimation anim(&visRect, "area.x", nullptr);
-    // anim.setDuration(1000);
-    // anim.setStartValue(0);
-    // anim.setStartValue(200);
-    // anim.start();
+    // -- todo: animations?
 
     window.show();
     return app.exec();
 }
-
-// #include "ai_wwid.moc"
