@@ -3,7 +3,10 @@
 
 // @includes -----------------------------------------------------------------------------------------------------------------
 
-// generated from include-what-you-use
+// -- I could just #include <QWidgets>, but then the compile time
+// -- would be longer. "foo.h" instead of <Foo> becuase it lets me <gd>
+// -- into the file in Helix. Annotations from `include-what-you-use`.
+// 
 // -- Qt includes
 #include "qabstractitemmodel.h"   // for QModelIndex
 #include "qaction.h"              // for QAction
@@ -1338,18 +1341,20 @@ struct MainWindow : public QMainWindow {
       this->root->setLayout(root_hlayout);
     #endif
 
-      log_debug("Column 1...");
-      this->left_button_stripe = new QWidget(this->root);
-      {
-        auto vbox = new QVBoxLayout();
-        this->tree_btn = new QPushButton("Tree"); vbox->addWidget(tree_btn);
-        this->splitter->addWidget(this->left_button_stripe);
 
-        auto space = new QSpacerItem(0, 0, QSizePolicy::Expanding, QSizePolicy::Expanding);
-        vbox->addSpacerItem(space);
+      log_debug("Column 1...");
+      // -- XXX: for now, there is no point in having this, also it looks ugly
+      // this->left_button_stripe = new QWidget(this->root);
+      // {
+      //   auto vbox = new QVBoxLayout();
+      //   this->tree_btn = new QPushButton("Tree"); vbox->addWidget(tree_btn);
+      //   this->splitter->addWidget(this->left_button_stripe);
+
+      //   auto space = new QSpacerItem(0, 0, QSizePolicy::Expanding, QSizePolicy::Expanding);
+      //   vbox->addSpacerItem(space);
          
-        this->left_button_stripe->setLayout(vbox);
-      }
+      //   this->left_button_stripe->setLayout(vbox);
+      // }
 
       log_debug("Column 2...");
       this->tree_view = new QTreeView(this->root);
@@ -1507,7 +1512,7 @@ struct MainWindow : public QMainWindow {
               this,
               "Open File",
               nullptr, // current dir
-              "Stepmania files (*.sm)"
+              "Stepmania game files (.sm) (*.sm)"
             );
             if (fileName != nullptr) {
               std::string std_fileName = fileName.toStdString();
@@ -1606,13 +1611,14 @@ void run_auto_restarter(int argc, char **argv);
 
 int main(int argc, char **argv) {
   // -- make float parsing not break in Czech locale
-  // -- XXX: why does this not work? For now, I'll set it nearby float parsing.
+  // -- TODO: Figure out what exactly was broken, because I have seen this issue before,
+  // -- but right now, `LANG=cs_CZ.UTF-8` works fine
   // QLocale locale("C");
   // QLocale::setDefault(locale);
 
-  // -- QGuiApplication doesn't work if you want widgets
   run_auto_restarter(argc, argv);
 
+  // -- QGuiApplication doesn't work if you want widgets
   QApplication app(argc, argv);
   MainWindow window;
   window.show();

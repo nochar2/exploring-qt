@@ -1,7 +1,9 @@
 // doesn't work, even if I install kdePackages.qtcharts
+// 
+// on fedora it runs :) but white screen for now :(
 import QtGraphs
-ChartView {
-    title: "Line Chart"
+GraphsView {
+    // title: "Line Chart"
     anchors.fill: parent
     antialiasing: true
 

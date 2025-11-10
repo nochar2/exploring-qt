@@ -1,4 +1,5 @@
 // doesn't work, even if I install kdePackages.qtcharts
+// on fedora, this segfaults
 import QtCharts
 ChartView {
     title: "Line Chart"

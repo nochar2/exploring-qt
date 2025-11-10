@@ -71,9 +71,6 @@ int main(int argc, char **argv) {
   row.addLayout(&w_controls);
 
 
-
-
-
   QLabel w_text;
   w_text.setText("asdfjlkasdkljfasdjk");
   w_text.setTextInteractionFlags(Qt::TextInteractionFlag::TextSelectableByMouse);
