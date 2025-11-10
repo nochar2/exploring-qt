@@ -106,14 +106,16 @@ using std::ranges::views::enumerate;
 #define log_error(...)    log_err(__VA_ARGS__)
 
 
-// make C++ variants less disgusting
+// -- make C++ variants less disgusting
+// -- NOTE: you're supposed to do this with the "visitor" pattern, not like this. So, I might need
+// -- to rewrite these.
 #define WHEN(T,bod) if (std::holds_alternative<T>(*_vrnt)) { T _unpacked = std::get<T>(*_vrnt); bod }
 #define MATCH(val) typeof(val) *_vrnt = &val;
 
-  // -- T <-> std::variant <-> QVariant allows you to smuggle a pointer,
-  // -- which QVariant doesn't like for some reason.
-  #define PACK(x)   QVariant::fromValue(TreeValue(x))
-  #define UNPACK(x) x.value<TreeValue>()
+// -- T <-> std::variant <-> QVariant allows you to smuggle a pointer,
+// -- which QVariant doesn't like for some reason.
+#define PACK(x)   QVariant::fromValue(TreeValue(x))
+#define UNPACK(x) x.value<TreeValue>()
 
 
 // @forward-declarations -----------------------------------------------------------------------
@@ -169,7 +171,6 @@ struct NoteDisplayWidget : public QWidget {
 };
 
 
-
 struct NoteRowRect {
   QRectF rect; // 0 up to 4
   QColor color;
@@ -181,7 +182,7 @@ struct SmRelativePos {
   double smticks = 0;
 
   bool operator<(SmRelativePos other) {
-    // idk how <=> works
+    // -- idk how <=> works
     return
     this->measures < other.measures ? true :
     this->measures == other.measures ? (
@@ -226,12 +227,12 @@ struct SmRelativePos {
       pos.beats += 4 * n_borrows;
     }
 
-    // Try to cancel out floating point errors like .00...1 or .99...9
+    // -- Try to cancel out floating point errors like .00...1 or .99...9
     double deviation = round(pos.smticks) - pos.smticks;
     if (fabs(deviation) < 0.0001) { pos.smticks += deviation; }
     return pos;
   }
-  // again, this assumes 4/4 everywhere
+  // -- again, this assumes 4/4 everywhere
   double total_smticks() {
     return this->measures * 192 + this->beats * 48 + this->smticks;
   }
@@ -261,7 +262,7 @@ QColor difftype_to_qcolor(DiffType dt)
 }
 
 
-// convert "4th", "8th", "16th" ... to smticks
+// -- convert "4th", "8th", "16th" ... to smticks
 double smticks_in_1_(int subdiv){return 192./subdiv;};
 
 QColor smticks_to_qcolor(double smticks) {
@@ -307,7 +308,7 @@ bool smticks_are_sane(double smticks, int cur_snap_nths) {
   return std::fmod(smticks, 192/cur_snap_nths) == 0;
 }
 
-// this is for the Snap xx highlight
+// -- this is for the Snap xx highlight
 const char *snap_to_cstr_color (int snap) {
   switch (snap) {
     case 1: case 2: case 4: return "red";
@@ -335,11 +336,6 @@ int sm_sane_snap_lower_than(int snap) {
   }
   return 1;
 }
-
-
-
-
-
 
 
 
@@ -376,14 +372,8 @@ struct KVTreeModel : public QStandardItemModel {
   /* like why does it want a parent widget? it's not even visual, why is it its business? */
   KVTreeModel(QWidget *parent) : QStandardItemModel(parent) {};
 
-  // XXX: not good because it destroys scroll pos and expand state and other things
   void rebuild_the_entire_model_from_ground_truth();
-
   void refresh_note_at_pos(SmRelativePos pos);
-
-  // -- no longer needed
-  // bool setItemData(const QModelIndex &index, const QMap<int,QVariant> &values) override;
-  // bool setData(const QModelIndex &index, const QVariant &value, int role = Qt::EditRole) override;
 };
 
 
@@ -392,11 +382,10 @@ struct KVTreeViewDelegate : public QStyledItemDelegate {
   KVTreeModel *model;
   KVTreeViewDelegate(KVTreeModel *model) : model(model) {}
 
-  // for HTML rendering
+  // -- for HTML rendering (text colors, I think?)
   void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override;
 
   QWidget* createEditor (QWidget* parent, const QStyleOptionViewItem& /*option*/,  const QModelIndex& index) const override;
-  // void setEditorData(QWidget *editor, const QModelIndex &index) const override;
   void setModelData(QWidget *editor, QAbstractItemModel *model, const QModelIndex &index) const override;
 };
 
@@ -407,13 +396,12 @@ struct KVTreeViewDelegate : public QStyledItemDelegate {
 struct SmFileState {
   SmFile smfile;
   std::string path;
-  // these two should be definitely file specific,
-  // not really diff specific
+  // -- these two should be definitely file specific, not really diff specific
   SmRelativePos cur_chart_pos = {0};
   int cur_snap_nths = 16;
 };
 
-// ground truth data
+// -- ground truth data
 struct State {
 
 private:
@@ -426,9 +414,9 @@ public:
     this->cur_file = (this->cur_file == (size_t)-1) ? 0 : this->cur_file;
   }
 
-  // All I want to do:
-  // - construct an optional ref, by an injection into the coproduct SmFileState + {nullopt}
-  // - destruct by a match (switch) statement.
+  // All I want to do is the following thing:
+  // - construct an optional ref, so I can have either SmFileState or {nullopt}
+  // - destruct that by a match (switch) statement.
   // Why is this SO painful to do in C++? It doesn't even have optional references until C++26???
   // A pointer it is.
   SmFileState *cur_file_state() {
@@ -474,7 +462,7 @@ TextStatusBar::TextStatusBar(QWidget *parent, State *state, NoteDisplayWidget *n
   // -- We CANNOT redraw here. We don't have any files loaded yet, and this crashes because
   // -- it references a position of a currently loaded file. So, this whole widget
   // -- (or maybe most of the UI) can't exist if we don't have any files, or it has to
-  // -- use '--' or something. Think about what to do here.
+  // -- use '--' or something. I need to think about what to draw if there are no loaded files...
   // this->redraw();
 };
 
@@ -491,11 +479,12 @@ void TextStatusBar::redraw() {
   this->btn_to_reset_weird_snap.setText("(Reset)");
   this->btn_to_reset_weird_snap.setStyleSheet("margin: 0em; border: 0em; font-weight: 600;");
 
-  // TODO: There should be a snap policy, which is either of:
-  // - exact (some number of smticks)
-  // - nearest note
-  // - also, user selected snaps like gallopy triples or polys
-  // Too bad that you need a whole another widget to customize that...
+  // TODO: At some point, I'd like to introduce a *snap policy*, which is either of:
+  // - exact <n_smticks>: what most .sm editors do
+  // - nearest note:      easier to navigate through
+  // - possibly, user selected snaps like gallopy triples / polys / whatever...
+  // Unfortunately, this would need yet another widget / settings menu, and this code is already
+  // insanely messy as it is.
   this->label_snap.setText(
     QString("| Snap <span style='color: %1; font-weight: 600;'>%2</span>")
     .arg(snap_to_cstr_color(f->cur_snap_nths))
@@ -537,9 +526,7 @@ void NoteDisplayWidget::keyPressEvent(QKeyEvent *event) {
   
   // HACK-y as hell
   this->model->refresh_note_at_pos(pos);
-
   this->update();
-
 }
 
 void NoteDisplayWidget::paintEvent(QPaintEvent */*event*/) {
@@ -609,10 +596,12 @@ void NoteDisplayWidget::paintEvent(QPaintEvent */*event*/) {
 
       // -- In SM/Etterna, actual notes will have weird colors on weird snaps
       // -- because they are snapped to the nearest smtick (at least that's how
-      // -- they are stored in most files).
-      // -- There should be some checkbox somewhere if we want smticks to be int
-      // -- or float and only quantized on save. We don't want to break existing
-      // -- 28th colored streams for example.
+      // -- they are stored in 99.99 % of files). For example, 28th notes (septuplets)
+      // -- are typically not all gray, but have distinct colors that come from that
+      // -- quantization to smticks.
+      //
+      // -- TODO: not sure if the quantization should be here or what...
+
       // QColor color = smticks_to_qcolor((int32_t)roundl(s->smticks));
       QColor color = smticks_to_qcolor(s->smticks);
       color.setAlphaF(.6f);
@@ -640,11 +629,10 @@ void NoteDisplayWidget::paintEvent(QPaintEvent */*event*/) {
   {
     using enum NoteType;
     
-    // replace this if we encounter a non-4/4 file
+    // -- there are non-4/4 files, but they are so rare that it is just not worth considering
     uint32_t global_smticks
       = (uint32_t)pos.smticks + (uint32_t)pos.beats * 48 + (uint32_t)pos.measures * 48 * 4;
 
-    // this assumption is wrong, we want semi-transparent fakes
     NoteRowRects line;
 
     for (size_t i = 0; i < 4; i++) {
@@ -712,18 +700,15 @@ double NoteDisplayWidget::px_per_current_snap() {
   auto fs = this->state->cur_file_state();
   return 192.0 / fs->cur_snap_nths * px_per_smtick();
 }
-  /// On mouse wheel scroll:
-  /// no modifiers -> scroll,
-  /// ctrl -> change snap,
-  /// ctrl+shift -> change snap (fine)
+
+/// On mouse wheel scroll:
+/// no modifiers -> scroll,
+/// ctrl -> change snap,
+/// ctrl+shift -> change snap (fine)
 void NoteDisplayWidget::wheelEvent(QWheelEvent *event) {
   auto fs = this->state->cur_file_state();
   auto modifiers = QGuiApplication::keyboardModifiers();
   SmRelativePos new_pos = fs->cur_chart_pos;
-
-
-  // printf("pos before: %d %d %lf\n",
-  //        cur_chart_pos.measures, cur_chart_pos.beats, cur_chart_pos.smticks);
 
   if (modifiers & Qt::ControlModifier) { // change snap
     if (event->angleDelta().ry() < 0) {
@@ -746,11 +731,8 @@ void NoteDisplayWidget::wheelEvent(QWheelEvent *event) {
       new_pos = SmRelativePos::incremented_by(fs->cur_chart_pos, +smticks_in_1_(fs->cur_snap_nths));
     }
   }
-  // printf("pos after: %d %d %lg\n", new_pos.measures, new_pos.beats, new_pos.smticks);
   fs->cur_chart_pos = (new_pos.measures < 0) ? (SmRelativePos){0} : new_pos;
 
-  // printf("raw smticks: %d\n", chart_pos.raw_smticks());
-  // 
   // -- FIXMEEEEEEEEEEEEEEEE: we need to get the pointer to status_bar from somewhere,
   // -- but that reeks with spaghetti. Or I can store a list of magical function pointers
   // -- somewhere. I don't know of a good idea to resolve this
@@ -761,11 +743,6 @@ void NoteDisplayWidget::wheelEvent(QWheelEvent *event) {
 
 
 
-// class Cell : public QStandardItem {
-//   public:
-//   Cell() : QStandardItem() {}
-//   Cell(QString str) : QStandardItem(str) { };
-// };
 #define Cell QStandardItem
 
 
@@ -816,19 +793,16 @@ void KVTreeModel::refresh_note_at_pos(SmRelativePos data_pos)
       break;
     }
   }
-
-
-  // if (row.is_zero()) {
-    // TODO: remove the thing
-  // } else {
-    // TODO: add or update the thing
-  // }
-
-
-
-  
 }
 
+
+/*
+  Nukes and rebuilds the entire TreeModel from ground truth.
+  NOTE: This is technically wrong, and every time I update the model,
+  the view scrolls to the top. This just felt easier to do
+  and reason about initially, but might have to be rewritten.
+  Actually, this whole file might need to be rewritten :(
+*/
 void KVTreeModel::rebuild_the_entire_model_from_ground_truth() {
   // -- I construct a Cell (QStandardItem) the following way:
   // -- * the value in constructor is merely a visual string
@@ -1058,26 +1032,6 @@ filepath_to_smfile_opt(const char *path) {
   auto smfile_opt = string_to_smfile_opt(smfile_str);
   return smfile_opt;
 }
-
-/*
-SmFileState::SmFileState(const char *path) {
-  // -- parse the file
-  std::string smfile_str = read_entire_file(path);
-  auto smfile_opt = string_to_smfile_opt(smfile_str);
-
-  MATCH (smfile_opt) {
-    WHEN (SmFile,
-      smfile = _unpacked;
-    )
-    else WHEN (SmParseError, 
-      eprintfln("%s", _unpacked.msg.c_str());
-      assert(false);
-    )
-    else assert(false && "unhandled variant");
-  }
-}  
-*/
-
 
 
 void KVTreeViewDelegate::paint
