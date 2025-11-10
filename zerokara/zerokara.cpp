@@ -1,4 +1,5 @@
- // #define SPLITTER
+// conditional, either use hboxlayout or splitter
+ #define SPLITTER
 
 // @includes -----------------------------------------------------------------------------------------------------------------
 
@@ -1325,11 +1326,12 @@ struct MainWindow : public QMainWindow {
   QTreeView          *tree_view;
   KVTreeViewDelegate *tree_view_delegate;
 
-#ifdef SPLITTER
-  QHBoxLayout *root_layout_just_to_fill_entire_space;
-    QSplitter *resizable_layout;
-#else
   QWidget *root;
+
+#ifdef SPLITTER
+  QLayout *root_layout_just_to_fill_entire_space;
+    QSplitter *splitter;
+#else
   QHBoxLayout *root_hlayout;
 #endif
       QWidget *left_button_stripe;
@@ -1370,12 +1372,12 @@ struct MainWindow : public QMainWindow {
       this->root = new QWidget(this);
       // just trying to make it span the window width
       // also this is mostly broken
-      this->root_hlayout_dummy = new QHBoxLayout();
-      this->root->setLayout(root_hlayout_dummy);
+      this->root_layout_just_to_fill_entire_space = new QHBoxLayout();
+      this->root->setLayout(root_layout_just_to_fill_entire_space);
 
       this->splitter = new QSplitter(Qt::Horizontal);
       this->splitter->setHandleWidth(6);
-      this->root_hlayout_dummy->addWidget(resizable_layout);
+      this->root_layout_just_to_fill_entire_space->addWidget(splitter);
     #else
       this->root = new QWidget(this);
       this->root_hlayout = new QHBoxLayout();
@@ -1387,7 +1389,7 @@ struct MainWindow : public QMainWindow {
       {
         auto vbox = new QVBoxLayout();
         this->tree_btn = new QPushButton("Tree"); vbox->addWidget(tree_btn);
-        root_hlayout->addWidget(this->left_button_stripe);
+        this->splitter->addWidget(this->left_button_stripe);
 
         auto space = new QSpacerItem(0, 0, QSizePolicy::Expanding, QSizePolicy::Expanding);
         vbox->addSpacerItem(space);
@@ -1399,7 +1401,7 @@ struct MainWindow : public QMainWindow {
       this->tree_view = new QTreeView(this->root);
       {
         #ifdef SPLITTER
-          resizable_layout->addWidget(tree_view);
+          splitter->addWidget(tree_view);
         #else
           root_hlayout->addWidget(tree_view);
           root_hlayout->setStretchFactor(tree_view, 1);
@@ -1531,7 +1533,7 @@ struct MainWindow : public QMainWindow {
 
         // UGHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
       #ifdef SPLITTER
-        this->resizable_layout->addWidget(right_chunk);
+        this->splitter->addWidget(right_column);
       #else
         this->root_hlayout->addWidget(right_column);
         this->root_hlayout->setStretchFactor(right_column, 2);
@@ -1575,7 +1577,7 @@ struct MainWindow : public QMainWindow {
     log_debug("Loading files..."); 
     {
       load_file_unchecked_for_now("ext/Shannon's Theorem.sm");
-      load_file_unchecked_for_now("ext/Yatsume Ana.sm");
+      // load_file_unchecked_for_now("ext/Yatsume Ana.sm");
       // load_file_unchecked_for_now("ext/psychology.sm"); // -- this is multi bpm, also boo find a more interesting file
     }
 
