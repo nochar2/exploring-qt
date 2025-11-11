@@ -1,7 +1,3 @@
-// #include <QApplication>
-// #include <QMainWindow>
-// #include <QPushButton>
-// #include <QHBoxLayout>
 #include <QApplication>
 #include <QMainWindow>
 #include <QPushButton>

@@ -2,8 +2,6 @@
 #include <QLabel>
 #include <QBoxLayout>
 
-
-
 int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);

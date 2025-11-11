@@ -10,7 +10,7 @@ int main(int argc, char **argv) {
    btn.setText("aaaaaaaaaaaaaaaaaaaaaa");
 
    QGraphicsOpacityEffect eff(&btn);
-   eff.setOpacity(0);
+   eff.setOpacity(0.1);
 
 
    btn.show();

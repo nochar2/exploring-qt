@@ -16,7 +16,7 @@ int main(int argc, char *argv[])
     QWidget window;
     window.resize(400, 400);
 
-    QPushButton *button = new QPushButton("Spawn square", &window);
+    auto *button = new QPushButton("Spawn square", &window);
     button->setFixedSize(150, 40);
 
     QHBoxLayout layout; window.setLayout(&layout);
@@ -25,7 +25,7 @@ int main(int argc, char *argv[])
 
     QObject::connect(button, &QPushButton::clicked, [&]() {
         // QWidget *sq = new QWidget(&window);
-        QPushButton *sq = new QPushButton(&window);
+        auto *square = new QPushButton(&window);
         // sq->setAutoFillBackground(false);
 
         // ???
@@ -38,21 +38,21 @@ int main(int argc, char *argv[])
 
         // -- DUMB! But I don't know how to do this. There is no opacity attr, the above
         // window hints don't work
-        sq->setStyleSheet("background-color: rgba(255, 0, 0, " + QString::number(50) + ")");
+        square->setStyleSheet("background-color: rgba(255, 0, 0, " + QString::number(50) + ")");
 
         int sqSize = 40;
-        sq->resize(sqSize, sqSize);
+        square->resize(sqSize, sqSize);
 
         // Random x position
-        int x = QRandomGenerator::global()->bounded(window.width() - sq->width());
+        int x = QRandomGenerator::global()->bounded(window.width() - square->width());
         int y = 0;
 
-        sq->move(x, y);
-        sq->show();
+        square->move(x, y);
+        square->show();
 
 
         // Animate from top to bottom        
-        auto animPos = new QPropertyAnimation (sq, "pos");
+        auto animPos = new QPropertyAnimation (square, "pos");
         
         animPos->setDuration(2000);
         animPos->setStartValue(QPoint(x, y));

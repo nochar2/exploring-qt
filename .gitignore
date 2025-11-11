@@ -24,5 +24,6 @@
 !Shannon's Theorem.sm
 !notes/
 
-# let's just use this instead of messing with qmake
-!Makefile
+# there are some microprojects that still use qmake, which generate
+# giant makefiles; let's unignore makefiles on a case-by-case basis
+# !Makefile
